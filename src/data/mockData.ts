@@ -78,7 +78,10 @@ export const initialAssetCategories: AssetCategory[] = [
         id: 3, name: 'Infrastruktur Fiber Optik', isCustomerInstallable: true, associatedDivisions: [3],
         types: [
             { id: 31, name: 'Kabel Dropcore', classification: 'material', trackingMethod: 'bulk', unitOfMeasure: 'Meter', baseUnitOfMeasure: 'Meter', quantityPerUnit: 1, standardItems: [{ id: 311, name: 'Dropcore 1 Core', brand: 'FiberHome' }] },
-            { id: 32, name: 'Konektor', classification: 'material', trackingMethod: 'bulk', unitOfMeasure: 'Pcs', standardItems: [{ id: 321, name: 'Fast Connector SC/UPC', brand: 'Generic' }] }
+            // NEW ITEMS for Auto-Population
+            { id: 32, name: 'Konektor / Adaptor', classification: 'material', trackingMethod: 'bulk', unitOfMeasure: 'Pcs', standardItems: [{ id: 321, name: 'Fast Connector SC/UPC', brand: 'Generic' }, { id: 322, name: 'Adaptor SC-UPC', brand: 'Generic' }] },
+            { id: 33, name: 'Patchcord', classification: 'material', trackingMethod: 'bulk', unitOfMeasure: 'Pcs', standardItems: [{ id: 331, name: 'Patchcord SC-UPC 3M', brand: 'Generic' }] },
+            { id: 34, name: 'Pelindung (Sleeve)', classification: 'material', trackingMethod: 'bulk', unitOfMeasure: 'Pcs', standardItems: [{ id: 341, name: 'Protection Sleeve 60mm', brand: 'Generic' }] }
         ]
     },
     {
@@ -107,8 +110,10 @@ export const mockAssets: Asset[] = [
     // D. WARRANTY EXPIRING (For Dashboard)
     { id: 'AST-007', name: 'Unifi AP AC Lite', category: 'Perangkat Pelanggan (CPE)', type: 'Access Point', brand: 'Ubiquiti', serialNumber: 'SN-UB-11', status: AssetStatus.IN_USE, condition: AssetCondition.GOOD, currentUser: 'Leader Network', location: 'Kantor Lt 2', registrationDate: d(-360), warrantyEndDate: d(5), recordedBy: 'Admin Purchase', purchasePrice: 1500000, attachments: [], activityLog: [] },
 
-    // E. MATERIAL (Bulk Item) - Represented as Single Entry in Assets (for logic) + Stock Movements
-    { id: 'MAT-001', name: 'Dropcore 1 Core', category: 'Infrastruktur Fiber Optik', type: 'Kabel Dropcore', brand: 'FiberHome', status: AssetStatus.IN_STORAGE, condition: AssetCondition.BRAND_NEW, location: 'Gudang Kabel', registrationDate: d(-30), recordedBy: 'Admin Logistik', purchasePrice: 1500, attachments: [], activityLog: [] }
+    // E. MATERIAL (Bulk Item)
+    { id: 'MAT-001', name: 'Dropcore 1 Core', category: 'Infrastruktur Fiber Optik', type: 'Kabel Dropcore', brand: 'FiberHome', status: AssetStatus.IN_STORAGE, condition: AssetCondition.BRAND_NEW, location: 'Gudang Kabel', registrationDate: d(-30), recordedBy: 'Admin Logistik', purchasePrice: 1500, attachments: [], activityLog: [] },
+    // Adding dummy assets for new materials so they appear in stock count logic (optional but good for testing)
+    { id: 'MAT-002', name: 'Adaptor SC-UPC', category: 'Infrastruktur Fiber Optik', type: 'Konektor / Adaptor', brand: 'Generic', status: AssetStatus.IN_STORAGE, condition: AssetCondition.BRAND_NEW, location: 'Gudang Acc', registrationDate: d(-10), recordedBy: 'Admin Logistik', purchasePrice: 5000, attachments: [], activityLog: [] }
 ];
 
 // --- 4. CUSTOMERS (Case: Active, New, Suspended) ---
@@ -213,8 +218,9 @@ export const mockDismantles: Dismantle[] = [
     { id: 'DSM-001', docNumber: 'DSM-202310-005', dismantleDate: d(-5), requestNumber: 'REQ-DIS-01', assetId: 'AST-002', assetName: 'Huawei HG8245H', technician: 'Staff Teknisi', customerId: 'CUST-003', customerName: 'Ruko Indah Makmur', customerAddress: 'Komp Ruko', retrievedCondition: AssetCondition.GOOD, notes: 'Pelanggan suspend', status: ItemStatus.COMPLETED, acknowledger: 'Admin Logistik' }
 ];
 
+// Updated format: WO-IKR-DDMMYY-NNNN
 export const mockInstallations: Installation[] = [
-    { id: 'INST-001', docNumber: 'INST-202308-001', installationDate: d(-45), technician: 'Staff Teknisi', customerId: 'CUST-001', customerName: 'PT. Maju Jaya', assetsInstalled: [], materialsUsed: [{ itemName: 'Dropcore 1 Core', brand: 'FiberHome', quantity: 150, unit: 'Meter' }], notes: 'Instalasi baru', status: ItemStatus.COMPLETED }
+    { id: 'INST-001', docNumber: 'WO-IKR-150825-0001', installationDate: d(-45), technician: 'Staff Teknisi', customerId: 'CUST-001', customerName: 'PT. Maju Jaya', assetsInstalled: [], materialsUsed: [{ itemName: 'Dropcore 1 Core', brand: 'FiberHome', quantity: 150, unit: 'Meter' }], notes: 'Instalasi baru', status: ItemStatus.COMPLETED }
 ];
 
 export const mockMaintenances: Maintenance[] = [
@@ -224,7 +230,9 @@ export const mockMaintenances: Maintenance[] = [
 // --- 9. STOCK MOVEMENTS (Card History) ---
 export const mockStockMovements: StockMovement[] = [
     { id: 'MOV-001', assetName: 'Dropcore 1 Core', brand: 'FiberHome', date: d(-60), type: 'IN_PURCHASE', quantity: 1000, balanceAfter: 1000, referenceId: 'PO-001', actor: 'Admin Logistik', notes: 'Stok awal' },
-    { id: 'MOV-002', assetName: 'Dropcore 1 Core', brand: 'FiberHome', date: d(-45), type: 'OUT_INSTALLATION', quantity: 150, balanceAfter: 850, referenceId: 'INST-001', actor: 'Staff Teknisi', notes: 'Instalasi PT. Maju Jaya' }
+    { id: 'MOV-002', assetName: 'Dropcore 1 Core', brand: 'FiberHome', date: d(-45), type: 'OUT_INSTALLATION', quantity: 150, balanceAfter: 850, referenceId: 'INST-001', actor: 'Staff Teknisi', notes: 'Instalasi PT. Maju Jaya' },
+    // Initial Stock for new materials
+    { id: 'MOV-003', assetName: 'Adaptor SC-UPC', brand: 'Generic', date: d(-10), type: 'IN_PURCHASE', quantity: 500, balanceAfter: 500, referenceId: 'PO-002', actor: 'Admin Logistik', notes: 'Stok awal aksesoris' }
 ];
 
 export const mockNotifications: Notification[] = [

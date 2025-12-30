@@ -26,7 +26,6 @@ const CustomerFormPage: React.FC<CustomerFormPageProps> = (props) => {
     
     // Use Stores
     const customers = useMasterDataStore((state) => state.customers);
-    const setCustomers = (data: Customer[]) => useMasterDataStore.setState({ customers: data }); // Direct helper or use update actions
     const addCustomer = useMasterDataStore((state) => state.addCustomer);
     const updateCustomer = useMasterDataStore((state) => state.updateCustomer);
     
@@ -86,10 +85,20 @@ const CustomerFormPage: React.FC<CustomerFormPageProps> = (props) => {
     };
 
     const handleSaveCustomer = async (
-        formData: Omit<Customer, 'id' | 'activityLog'>,
+        // REFACTOR: 'id' sekarang disertakan dalam formData (sudah tidak di-omit)
+        formData: Omit<Customer, 'activityLog'>,
         newlyAssignedAssetIds: string[],
         unassignedAssetIds: string[]
     ) => {
+        // --- 0. Validate ID Uniqueness for New Customers ---
+        if (!isEditing) {
+            const idExists = customers.some(c => c.id === formData.id);
+            if (idExists) {
+                addNotification(`Gagal: ID Pelanggan "${formData.id}" sudah digunakan. Harap gunakan ID lain.`, 'error');
+                return;
+            }
+        }
+
         // --- 1. Update Assets Side Effects (Aset Tetap/Perangkat) ---
         for (const assetId of unassignedAssetIds) {
             await updateAsset(assetId, {
@@ -100,7 +109,7 @@ const CustomerFormPage: React.FC<CustomerFormPageProps> = (props) => {
             });
         }
 
-        const targetCustomerId = isEditing ? customerToEdit.id : `TMI-${String(1000 + customers.length + 1).padStart(5, '0')}`;
+        const targetCustomerId = formData.id; // Gunakan ID dari form
 
         for (const assetId of newlyAssignedAssetIds) {
             await updateAsset(assetId, {
@@ -136,7 +145,6 @@ const CustomerFormPage: React.FC<CustomerFormPageProps> = (props) => {
         } else {
             const newCustomer: Customer = {
                 ...formData,
-                id: targetCustomerId,
                 activityLog: [{
                     id: `log-create-${Date.now()}`,
                     timestamp: new Date().toISOString(),

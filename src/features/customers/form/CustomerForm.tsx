@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Customer, CustomerStatus, Asset, AssetStatus, InstalledMaterial, AssetCategory } from '../../../types';
+import { Customer, CustomerStatus, Asset, InstalledMaterial, AssetCategory } from '../../../types';
 import DatePicker from '../../../components/ui/DatePicker';
 import { useNotification } from '../../../providers/NotificationProvider';
 import FloatingActionBar from '../../../components/ui/FloatingActionBar';
@@ -19,7 +19,7 @@ interface CustomerFormProps {
     customer: Customer | null;
     assets: Asset[];
     onSave: (
-        formData: Omit<Customer, 'id' | 'activityLog'>,
+        formData: Omit<Customer, 'activityLog'>,
         newlyAssignedAssetIds: string[],
         unassignedAssetIds: string[]
     ) => void;
@@ -40,16 +40,18 @@ const FormSection: React.FC<{ title: string; icon: React.ReactNode; children: Re
 );
 
 const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, onCancel }) => {
-    // Hooks Logic
+    // Hooks Logic - Terintegrasi dengan Asset Store & Categories
     const { installableAssets, materialOptions } = useCustomerAssetLogic();
 
     type MaterialFormItem = {
         tempId: number;
-        modelKey: string; // "itemName|brand"
+        modelKey: string; // Format: "itemName|brand"
         quantity: number | '';
         unit: string;
     };
 
+    // State Fields
+    const [customerId, setCustomerId] = useState('');
     const [name, setName] = useState('');
     const [address, setAddress] = useState('');
     const [phone, setPhone] = useState('');
@@ -58,9 +60,12 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
     const [installationDate, setInstallationDate] = useState<Date | null>(new Date());
     const [servicePackage, setServicePackage] = useState('');
     
+    // Validation State
     const [emailError, setEmailError] = useState('');
     const [addressError, setAddressError] = useState('');
+    const [idError, setIdError] = useState('');
     
+    // Asset Management State
     const [initialAssignedAssetIds, setInitialAssignedAssetIds] = useState<string[]>([]);
     const [assignedAssetIds, setAssignedAssetIds] = useState<string[]>([]);
     const [materials, setMaterials] = useState<MaterialFormItem[]>([]);
@@ -71,13 +76,16 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
     const formId = "customer-form";
     const addNotification = useNotification();
 
-    // Use hook result, filtering out already assigned assets in list
+    // Filter aset yang sudah dipilih agar tidak muncul lagi di dropdown
     const availableAssets = useMemo(() => {
         return installableAssets.filter(opt => !assignedAssetIds.includes(opt.value));
     }, [installableAssets, assignedAssetIds]);
 
+    // Initial Data Load & Auto-Population Logic
     useEffect(() => {
         if (customer) {
+            // MODE EDIT: Load existing data
+            setCustomerId(customer.id);
             setName(customer.name);
             setAddress(customer.address);
             setPhone(customer.phone);
@@ -97,24 +105,33 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
                 unit: m.unit,
             })));
         } else {
+            // MODE NEW: Reset & Auto-populate Standard Materials
+            setCustomerId('');
             setName(''); setAddress(''); setPhone(''); setEmail('');
             setStatus(CustomerStatus.ACTIVE); setInstallationDate(new Date()); setServicePackage('');
             setInitialAssignedAssetIds([]); setAssignedAssetIds([]);
             
-            // Auto-populate default materials for new customers
-            const defaultKeywords = ['Patchcord', 'Adaptor', 'Dropcore', 'protector sleeve'];
-            const defaultMaterials = defaultKeywords.map((keyword, idx): MaterialFormItem | null => {
-                const match = materialOptions.find(opt => opt.label.toLowerCase().includes(keyword.toLowerCase()));
-                if (match) {
-                    return {
-                        tempId: Date.now() + idx,
-                        modelKey: match.value,
-                        quantity: 0, // Default quantity, editable by user
-                        unit: match.unit || 'pcs'
-                    };
-                }
-                return null;
-            }).filter((m): m is MaterialFormItem => m !== null);
+            // LOGIKA AUTO-POPULATE MATERIAL
+            // Mencari item di master data (materialOptions) yang cocok dengan keyword standar
+            const standardMaterialKeywords = ['Dropcore', 'Patch', 'Adaptor', 'Sleeve'];
+            
+            const defaultMaterials: MaterialFormItem[] = [];
+            
+            if (materialOptions.length > 0) {
+                standardMaterialKeywords.forEach((keyword, idx) => {
+                    // Cari opsi yang labelnya mengandung keyword (case insensitive)
+                    const match = materialOptions.find(opt => opt.label.toLowerCase().includes(keyword.toLowerCase()));
+                    
+                    if (match) {
+                        defaultMaterials.push({
+                            tempId: Date.now() + idx,
+                            modelKey: match.value,
+                            quantity: 0, // Default 0, user tinggal isi jumlah
+                            unit: match.unit || 'pcs'
+                        });
+                    }
+                });
+            }
 
             setMaterials(defaultMaterials);
         }
@@ -130,6 +147,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
     // Validasi Real-time
     const isFormValid = useMemo(() => {
         return (
+            customerId.trim() !== '' &&
             name.trim() !== '' &&
             address.trim() !== '' &&
             phone.trim() !== '' &&
@@ -137,11 +155,19 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
             servicePackage.trim() !== '' &&
             installationDate !== null &&
             !emailError && 
-            !addressError
+            !addressError &&
+            !idError
         );
-    }, [name, address, phone, email, servicePackage, installationDate, emailError, addressError]);
+    }, [customerId, name, address, phone, email, servicePackage, installationDate, emailError, addressError, idError]);
 
     // Formatters
+    const handleIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value.toUpperCase().replace(/\s/g, '');
+        setCustomerId(val);
+        if (val.length < 3) setIdError('ID terlalu pendek.');
+        else setIdError('');
+    };
+
     const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const val = e.target.value;
         const formatted = val.replace(/\b\w/g, (char) => char.toUpperCase());
@@ -235,6 +261,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
         const newlyAssigned = assignedAssetIds.filter(id => !initialAssignedAssetIds.includes(id));
         const unassigned = initialAssignedAssetIds.filter(id => !assignedAssetIds.includes(id));
         
+        // Filter material yang memiliki quantity > 0 agar tidak menyimpan data kosong
         const finalMaterials: InstalledMaterial[] = materials
             .filter(m => m.modelKey && m.quantity && Number(m.quantity) > 0)
             .map(m => {
@@ -250,6 +277,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
 
         setTimeout(() => { // Simulate API call
             onSave({
+                id: customerId, 
                 name, address, phone, email, status,
                 installationDate: installationDate ? installationDate.toISOString().split('T')[0] : '',
                 servicePackage: servicePackage ? `${servicePackage} Mbps` : '',
@@ -279,15 +307,32 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
         <>
             <form id={formId} onSubmit={handleSubmit} className="space-y-4 pb-32">
                  <FormSection title="Informasi Kontak" icon={<UsersIcon className="w-6 h-6 mr-3 text-tm-primary" />}>
+                     {/* ID PELANGGAN FIELD */}
+                     <div className="md:col-span-2">
+                        <label htmlFor="customerId" className="block text-sm font-medium text-gray-700">ID Pelanggan</label>
+                        <div className="mt-1 relative rounded-md shadow-sm">
+                            <input 
+                                type="text" 
+                                id="customerId" 
+                                value={customerId} 
+                                onChange={handleIdChange} 
+                                disabled={!!customer} 
+                                required 
+                                className={`block w-full px-3 py-2 text-gray-900 bg-white border rounded-lg focus:outline-none focus:ring-tm-accent focus:border-tm-accent sm:text-sm font-mono uppercase ${idError ? 'border-red-500' : 'border-gray-300'} ${customer ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`}
+                                placeholder="Contoh: CUST-001" 
+                            />
+                        </div>
+                        {idError && <p className="mt-1 text-xs text-red-600">{idError}</p>}
+                        {!customer && <p className="mt-1 text-xs text-gray-500">ID harus unik. Disarankan format: CUST-XXXX atau Nama Singkat.</p>}
+                     </div>
+
                      <div className="md:col-span-2">
                         <label htmlFor="customerName" className="block text-sm font-medium text-gray-700">Nama Pelanggan</label>
                         <input type="text" id="customerName" value={name} onChange={handleNameChange} required className="block w-full px-3 py-2 mt-1 text-gray-900 placeholder:text-gray-400 bg-gray-50 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-tm-accent focus:border-tm-accent sm:text-sm" />
-                        <p className="mt-1 text-xs text-gray-500">Huruf awal setiap kata otomatis kapital.</p>
                     </div>
                     <div>
                         <label htmlFor="customerPhone" className="block text-sm font-medium text-gray-700">Telepon (Auto Format)</label>
                         <input type="tel" id="customerPhone" value={phone} onChange={handlePhoneChange} required className="block w-full px-3 py-2 mt-1 text-gray-900 placeholder:text-gray-400 bg-gray-50 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-tm-accent focus:border-tm-accent sm:text-sm" placeholder="Contoh: 08123456789" />
-                        <p className="mt-1 text-xs text-gray-500">Otomatis diubah ke format +62-XXX-...</p>
                     </div>
                     <div>
                         <label htmlFor="customerEmail" className="block text-sm font-medium text-gray-700">Email</label>
@@ -301,7 +346,6 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
                         <label htmlFor="customerAddress" className="block text-sm font-medium text-gray-700">Alamat (Auto Prefix "Jl.")</label>
                         <textarea id="customerAddress" value={address} onChange={e => setAddress(e.target.value)} onBlur={handleAddressBlur} required rows={3} className={`block w-full px-3 py-2 mt-1 text-gray-900 placeholder:text-gray-400 bg-gray-50 border rounded-lg shadow-sm focus:outline-none focus:ring-tm-accent focus:border-tm-accent sm:text-sm ${addressError ? 'border-red-500' : 'border-gray-300'}`} placeholder="Nama Jalan, Nomor, RT/RW, Kelurahan..." />
                         {addressError && <p className="mt-1 text-xs text-red-600">{addressError}</p>}
-                        <p className="mt-1 text-xs text-gray-500">Awalan "Jl." akan ditambahkan otomatis jika belum ada.</p>
                     </div>
                 </FormSection>
 
@@ -377,9 +421,9 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
                     </div>
                 </FormSection>
 
-                <FormSection title="Kelola Material Terpakai" icon={<WrenchIcon className="w-6 h-6 mr-3 text-tm-primary" />}>
+                <FormSection title="Kelola Material Terpakai (Otomatis)" icon={<WrenchIcon className="w-6 h-6 mr-3 text-tm-primary" />}>
                     <div className="md:col-span-2">
-                        <p className="text-sm text-gray-600 mb-4">Daftar material habis pakai yang digunakan (misal: kabel, konektor).</p>
+                        <p className="text-sm text-gray-600 mb-4">Daftar material instalasi standar. Isi jumlah yang digunakan.</p>
                         <div className="space-y-3">
                             {materials.map((material, index) => (
                                 <div key={material.tempId} className="relative grid grid-cols-1 md:grid-cols-12 gap-x-4 gap-y-2 p-3 bg-gray-100/60 border rounded-lg items-end">
@@ -399,8 +443,9 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
                                             type="number" 
                                             value={material.quantity}
                                             onChange={(e) => handleMaterialChange(material.tempId, 'quantity', e.target.value === '' ? '' : Number(e.target.value))}
-                                            min="1"
-                                            className="block w-full px-3 py-2 mt-1 text-gray-900 bg-white border border-gray-300 rounded-lg shadow-sm sm:text-sm"
+                                            min="0"
+                                            className={`block w-full px-3 py-2 mt-1 text-gray-900 bg-white border rounded-lg shadow-sm sm:text-sm ${material.quantity === 0 ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`}
+                                            placeholder="0"
                                         />
                                     </div>
                                     <div className="md:col-span-2">
@@ -416,7 +461,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
                             ))}
                         </div>
                         <button type="button" onClick={handleAddMaterial} className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-white bg-tm-accent rounded-md shadow-sm hover:bg-tm-primary">
-                            <PlusIcon className="w-4 h-4"/>Tambah Material
+                            <PlusIcon className="w-4 h-4"/>Tambah Material Lain
                         </button>
                          {materials.length === 0 && (
                             <p className="text-xs text-center text-gray-500 py-4 border-t mt-4">Belum ada material yang ditambahkan.</p>

@@ -11,6 +11,7 @@ import { Letterhead } from '../../../../components/ui/Letterhead';
 import { SignatureStamp } from '../../../../components/ui/SignatureStamp';
 import { TrashIcon } from '../../../../components/icons/TrashIcon';
 import { PlusIcon } from '../../../../components/icons/PlusIcon';
+import { PencilIcon } from '../../../../components/icons/PencilIcon';
 import { useCustomerAssetLogic } from '../../hooks/useCustomerAssetLogic';
 
 // Stores
@@ -19,6 +20,7 @@ import { useTransactionStore } from '../../../../stores/useTransactionStore';
 
 interface InstallationFormProps {
     currentUser: User;
+    // Update: onSave sekarang menerima docNumber dari form
     onSave: (data: Omit<Installation, 'id'|'status'>) => void;
     onCancel: () => void;
     prefillCustomerId?: string;
@@ -34,6 +36,8 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
 
     const [installationDate, setInstallationDate] = useState<Date | null>(new Date());
     const [docNumber, setDocNumber] = useState('');
+    const [isManualDocNumber, setIsManualDocNumber] = useState(false); // Track if user manually edited
+    
     const [requestNumber, setRequestNumber] = useState('');
     const [technician, setTechnician] = useState('');
     const [selectedCustomerId, setSelectedCustomerId] = useState(prefillCustomerId || '');
@@ -97,10 +101,13 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
         }
     }, [materialOptions]);
 
+    // Auto-generate doc number when date changes, unless manually edited
     useEffect(() => {
-        const newDocNumber = generateDocumentNumber('INST', installations, installationDate || new Date());
-        setDocNumber(newDocNumber);
-    }, [installationDate, installations]);
+        if (!isManualDocNumber) {
+            const newDocNumber = generateDocumentNumber('WO-IKR', installations, installationDate || new Date());
+            setDocNumber(newDocNumber);
+        }
+    }, [installationDate, installations, isManualDocNumber]);
 
     useEffect(() => {
         const observer = new IntersectionObserver(([entry]) => setIsFooterVisible(entry.isIntersecting), { threshold: 0.1 });
@@ -143,6 +150,12 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
             return item;
         }));
     };
+    
+    // Handler for manual Doc Number edit
+    const handleDocNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        setDocNumber(e.target.value.toUpperCase());
+        setIsManualDocNumber(true);
+    };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -152,6 +165,10 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
         }
         if (assetsInstalled.length === 0 && materialsUsed.filter(m => m.modelKey && m.quantity).length === 0) {
             addNotification('Tambahkan setidaknya satu aset atau material yang dipasang.', 'error');
+            return;
+        }
+        if (!docNumber.trim()) {
+            addNotification('Nomor Dokumen tidak boleh kosong.', 'error');
             return;
         }
 
@@ -172,7 +189,7 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
 
         setTimeout(() => {
             onSave({
-                docNumber,
+                docNumber, // Use state docNumber (edited or generated)
                 requestNumber: requestNumber || undefined,
                 installationDate: installationDate!.toISOString().split('T')[0],
                 technician,
@@ -220,10 +237,34 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
                 <section className="p-4 border-t border-b">
                     <h4 className="font-semibold text-gray-800 border-b pb-1 mb-4">Informasi Dokumen</h4>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div><label className="block text-sm font-medium text-gray-700">Tanggal Instalasi</label><DatePicker id="instDate" selectedDate={installationDate} onDateChange={setInstallationDate} /></div>
-                        <div><label className="block text-sm font-medium text-gray-700">Teknisi</label><CustomSelect options={technicianOptions} value={technician} onChange={setTechnician} /></div>
-                        <div><label className="block text-sm font-medium text-gray-700">No. Dokumen</label><input type="text" value={docNumber} readOnly className="w-full mt-1 p-2 bg-gray-100 border rounded-md text-gray-600" /></div>
-                        <div><label className="block text-sm font-medium text-gray-700">No. Request Terkait (Opsional)</label><input type="text" value={requestNumber} onChange={e => setRequestNumber(e.target.value)} className="w-full mt-1 p-2 bg-white border border-gray-300 rounded-md shadow-sm" placeholder="Contoh: REQ-123"/></div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Tanggal Instalasi</label>
+                            <DatePicker id="instDate" selectedDate={installationDate} onDateChange={setInstallationDate} />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Teknisi</label>
+                            <CustomSelect options={technicianOptions} value={technician} onChange={setTechnician} />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">No. Dokumen (WO-IKR)</label>
+                            <div className="relative mt-1">
+                                <input 
+                                    type="text" 
+                                    value={docNumber} 
+                                    onChange={handleDocNumberChange} 
+                                    className="block w-full px-3 py-2 text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm sm:text-sm focus:ring-tm-accent focus:border-tm-accent" 
+                                    placeholder="WO-IKR-DDMMYY-NNNN"
+                                />
+                                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-gray-400">
+                                    <PencilIcon className="w-4 h-4" />
+                                </div>
+                            </div>
+                            <p className="mt-1 text-xs text-gray-500">Format: WO-IKR-DDMMYY-NNNN. Dapat disesuaikan manual.</p>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">No. Request Terkait (Opsional)</label>
+                            <input type="text" value={requestNumber} onChange={e => setRequestNumber(e.target.value)} className="w-full mt-1 p-2 bg-white border border-gray-300 rounded-md shadow-sm" placeholder="Contoh: REQ-123"/>
+                        </div>
                     </div>
                 </section>
                 <section>

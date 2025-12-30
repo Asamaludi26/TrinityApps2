@@ -129,11 +129,13 @@ const InstallationFormPage: React.FC<InstallationFormPageProps> = (props) => {
         setView('detail');
     };
 
+    // REFACTOR: Now receives docNumber from the form component
     const handleSave = async (installationData: Omit<Installation, 'id' | 'status'>) => {
         const newInstallation: Installation = {
             ...installationData,
-            id: `INST-${String(installations.length + 1).padStart(3, '0')}`,
+            id: `INST-${Date.now()}`, // Internal ID can be simple time based
             status: ItemStatus.COMPLETED,
+            // docNumber is already inside installationData
         };
         
         await addInstallation(newInstallation);
