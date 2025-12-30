@@ -64,13 +64,11 @@ export const useRequestStore = create<RequestState>((set, get) => ({
 
   addRequest: async (requestData) => {
       const current = get().requests;
-      const maxId = current.reduce((max, r) => {
-        const idNum = parseInt(r.id.split('-')[1]);
-        return !isNaN(idNum) && idNum > max ? idNum : max;
-      }, 0);
-      const newId = `REQ-${String(maxId + 1).padStart(3, '0')}`;
       const requestDate = new Date(requestData.requestDate);
-      const docNumber = generateDocumentNumber('REQ', current, requestDate);
+      
+      // Menggunakan generator dokumen untuk membuat ID dengan format RO-YYMMDD-NNNN
+      const docsForGenerator = current.map(r => ({ docNumber: r.id }));
+      const newId = generateDocumentNumber('RO', docsForGenerator, requestDate);
       
       const itemStatuses: Record<number, any> = {};
       requestData.items.forEach(item => {
@@ -80,7 +78,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       const newRequest: Request = {
         ...requestData,
         id: newId,
-        docNumber: docNumber,
+        docNumber: newId, // ID Request sekaligus menjadi Nomor Dokumen
         status: ItemStatus.PENDING,
         itemStatuses: itemStatuses,
       };
@@ -167,12 +165,13 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       }
       
       const today = new Date();
-      const returnDocNumber = generateDocumentNumber('RET', returns, today);
+      // Update: Gunakan format RR (Request Return)
+      const returnDocNumber = generateDocumentNumber('RR', returns, today);
       const assetIds = returnItems.map(item => item.assetId);
 
       // Create ONE return document containing all items
       const newReturnDoc: AssetReturn = {
-          id: `RET-${Date.now()}`,
+          id: returnDocNumber, // Gunakan ID yang sama dengan DocNumber
           docNumber: returnDocNumber,
           returnDate: today.toISOString(),
           loanRequestId: loanRequest.id,

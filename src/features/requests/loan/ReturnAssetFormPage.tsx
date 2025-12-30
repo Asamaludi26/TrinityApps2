@@ -63,9 +63,9 @@ const ReturnAssetFormPage: React.FC<ReturnAssetFormPageProps> = ({
         setSelectedAssetIds(preselectedAssets.map(a => a.id));
     }, [preselectedAssets]);
 
-    // Generate Doc Number
+    // Generate Doc Number with RR prefix
     useEffect(() => {
-        const newDocNumber = generateDocumentNumber('RET', returns, returnDate || new Date());
+        const newDocNumber = generateDocumentNumber('RR', returns, returnDate || new Date());
         setDocNumber(newDocNumber);
     }, [returnDate, returns]);
     

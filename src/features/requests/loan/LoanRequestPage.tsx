@@ -94,7 +94,7 @@ const LoanRequestPage: React.FC<LoanRequestPageProps> = (props) => {
         if (highlightedItemId) {
             setHighlightedId(highlightedItemId);
             // Switch to the correct tab if highlighting a return
-            if (highlightedItemId.startsWith('RET-')) {
+            if (highlightedItemId.startsWith('RR-')) {
                 setActiveTab('returns');
             }
             clearHighlightOnReturn();
@@ -113,7 +113,7 @@ const LoanRequestPage: React.FC<LoanRequestPageProps> = (props) => {
     // Deep Linking via Filters
     useEffect(() => {
         if (initialFilters?.openDetailForId) {
-            if (initialFilters.openDetailForId.startsWith('LREQ-')) {
+            if (initialFilters.openDetailForId.startsWith('RL-') || initialFilters.openDetailForId.startsWith('LREQ-')) {
                 const request = loanRequests.find(req => req.id === initialFilters.openDetailForId);
                 if (request) {
                     setSelectedRequest(request);
@@ -132,11 +132,17 @@ const LoanRequestPage: React.FC<LoanRequestPageProps> = (props) => {
     const handleCreateRequest = async (data: { loanItems: LoanItem[]; notes: string; }) => {
         try {
             const userDivision = divisions.find(d => d.id === currentUser.divisionId)?.name || 'N/A';
+            const today = new Date();
+            
+            // Generate RL ID
+            const docsForGenerator = loanRequests.map(r => ({ docNumber: r.id }));
+            const newId = generateDocumentNumber('RL', docsForGenerator, today);
+
             const newRequest: LoanRequest = {
-                id: `LREQ-${(loanRequests.length + 1).toString().padStart(3, '0')}`,
+                id: newId,
                 requester: currentUser.name,
                 division: userDivision,
-                requestDate: new Date().toISOString(),
+                requestDate: today.toISOString(),
                 status: LoanRequestStatus.PENDING,
                 items: data.loanItems,
                 notes: data.notes,

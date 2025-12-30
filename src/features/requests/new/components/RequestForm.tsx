@@ -413,12 +413,12 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                       <div>
                           <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">No. Request</label>
-                          <div className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-400 text-sm italic shadow-sm">[Otomatis]</div>
+                          <div className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-400 text-sm italic shadow-sm">[Auto: RO-YYMMDD-XXXX]</div>
                       </div>
 
                       <div>
                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">No. Dokumen</label>
-                           <div className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-400 text-sm italic shadow-sm">[Otomatis]</div>
+                           <div className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-400 text-sm italic shadow-sm">[Auto: RO-YYMMDD-XXXX]</div>
                       </div>
 
                       <div>

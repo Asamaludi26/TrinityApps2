@@ -96,14 +96,22 @@ export const HandoverForm: React.FC<HandoverFormProps> = ({ onSave, onCancel, pr
 
     // Effects
     useEffect(() => {
-        const prefix = prefillData && 'requester' in prefillData ? 'HO-RO' : 'HO';
         if (handoverDate) {
-             const newDocNumber = generateDocumentNumber(prefix, handovers, handoverDate);
-             setDocNumber(newDocNumber);
+            // Tentukan Prefix berdasarkan Sumber (woRoIntNumber)
+            let prefix = 'HO'; // Default
+            
+            if (woRoIntNumber) {
+                if (woRoIntNumber.startsWith('RO-')) prefix = 'HO-RO';
+                else if (woRoIntNumber.startsWith('RL-')) prefix = 'HO-RL';
+                else if (woRoIntNumber.startsWith('RR-')) prefix = 'HO-RR';
+            }
+
+            const newDocNumber = generateDocumentNumber(prefix, handovers, handoverDate);
+            setDocNumber(newDocNumber);
         } else {
             setDocNumber('[Otomatis]');
         }
-    }, [handovers, prefillData, handoverDate]);
+    }, [handovers, woRoIntNumber, handoverDate]);
 
     useEffect(() => {
         if (ceo) setMengetahui(ceo.name);

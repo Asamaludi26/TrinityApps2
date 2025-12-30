@@ -91,7 +91,8 @@ export const RequestTable: React.FC<RequestTableProps> = ({
               />
             </th>
           )}
-          <SortableHeaderComp columnKey="id" sortConfig={sortConfig} requestSort={requestSort}>Info Request</SortableHeaderComp>
+          {/* Lebarkan kolom ID untuk format RO-YYMMDD-NNNN */}
+          <SortableHeaderComp columnKey="id" sortConfig={sortConfig} requestSort={requestSort} className="min-w-[140px]">Info Request</SortableHeaderComp>
           <SortableHeaderComp columnKey="requester" sortConfig={sortConfig} requestSort={requestSort}>Pemohon</SortableHeaderComp>
           <th scope="col" className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500">Detail Barang</th>
           <SortableHeaderComp columnKey="status" sortConfig={sortConfig} requestSort={requestSort}>Status</SortableHeaderComp>
@@ -152,7 +153,7 @@ export const RequestTable: React.FC<RequestTableProps> = ({
                 <td className="px-6 py-5 align-top">
                   <div className="flex flex-col gap-1.5">
                     <div className="flex items-center gap-2">
-                       <span className="text-sm font-bold text-slate-800 group-hover:text-tm-primary transition-colors font-mono">{req.id}</span>
+                       <span className="text-sm font-bold text-slate-800 group-hover:text-tm-primary transition-colors font-mono tracking-tight">{req.id}</span>
                        {showHighlight && <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>}
                     </div>
                     
