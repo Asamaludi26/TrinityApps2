@@ -69,9 +69,9 @@ export const ReturnRequestListView: React.FC<ReturnRequestListViewProps> = ({
             .filter(ret => {
                  const searchLower = searchQuery.toLowerCase();
                  return ret.docNumber.toLowerCase().includes(searchLower) || 
-                        ret.assetName.toLowerCase().includes(searchLower) ||
+                        ret.items.some(i => i.assetName.toLowerCase().includes(searchLower)) ||
                         ret.returnedBy.toLowerCase().includes(searchLower) ||
-                        ret.loanDocNumber.toLowerCase().includes(searchLower);
+                        ret.loanRequestId.toLowerCase().includes(searchLower);
             })
             .filter(ret => {
                 if (filters.status && ret.status !== filters.status) return false;

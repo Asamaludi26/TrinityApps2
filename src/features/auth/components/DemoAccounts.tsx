@@ -20,11 +20,11 @@ export const DemoAccounts: React.FC = () => {
     };
 
     const demoUsers: { role: UserRole, email: string, password: string }[] = [
-        { role: 'Super Admin', email: 'super.admin@triniti.com', password: 'password123' },
-        { role: 'Admin Purchase', email: 'purchase.admin@triniti.com', password: 'password123' },
-        { role: 'Admin Logistik', email: 'logistik.admin@triniti.com', password: 'password123' },
-        { role: 'Leader', email: 'leader.user@triniti.com', password: 'password123' },
-        { role: 'Staff', email: 'staff.user@triniti.com', password: 'password123' },
+        { role: 'Super Admin', email: 'super@triniti.com', password: 'password123' },
+        { role: 'Admin Logistik', email: 'logistik@triniti.com', password: 'password123' },
+        { role: 'Admin Purchase', email: 'purchase@triniti.com', password: 'password123' },
+        { role: 'Leader', email: 'leader@triniti.com', password: 'password123' },
+        { role: 'Staff', email: 'teknisi@triniti.com', password: 'password123' },
     ];
 
     const getRoleClass = (role: string) => {

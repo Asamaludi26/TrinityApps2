@@ -1,5 +1,3 @@
-
-
 import React, { useState, useEffect, useMemo } from "react";
 import { User, Page, PreviewData, Asset, Request, LoanRequest, AssetReturn } from "./types";
 
@@ -264,8 +262,10 @@ const AppContent: React.FC = () => {
                 .filter(r => r.docNumber === returnDocument.docNumber)
             : [];
       
+          // FIX: Accessing items via flatMap since AssetReturn now has 'items' array, not direct assetId
           const assetsForReturnDoc = allReturnDocuments
-                .map(r => useAssetStore.getState().assets.find(a => a.id === r.assetId))
+                .flatMap(r => r.items)
+                .map(item => useAssetStore.getState().assets.find(a => a.id === item.assetId))
                 .filter((a): a is Asset => a !== undefined);
           
           return (
@@ -276,7 +276,6 @@ const AppContent: React.FC = () => {
                 returnDocuments={allReturnDocuments}
                 assetsToReturn={assetsForReturnDoc}
                 onShowPreview={handleShowPreview}
-// FIX: Pass setActivePage to ReturnRequestDetailPage to handle navigation within the component.
                 setActivePage={setActivePage}
               />
           );

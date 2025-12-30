@@ -1,26 +1,27 @@
+
 import React, { useState, useEffect } from 'react';
-import { Asset } from '../../../../types';
+import { AssetReturnItem } from '../../../../types';
 import { Checkbox } from '../../../../components/ui/Checkbox';
 import { CheckIcon } from '../../../../components/icons/CheckIcon';
 import { CloseIcon } from '../../../../components/icons/CloseIcon';
 import { InfoIcon } from '../../../../components/icons/InfoIcon';
-import { BsBoxSeam } from 'react-icons/bs';
 
 interface ReturnVerificationPanelProps {
-    assetsToVerify: Asset[];
+    returnItems: AssetReturnItem[];
     onConfirm: (acceptedAssetIds: string[]) => void;
     onCancel: () => void;
     isLoading: boolean;
 }
 
 export const ReturnVerificationPanel: React.FC<ReturnVerificationPanelProps> = ({ 
-    assetsToVerify, onConfirm, onCancel, isLoading 
+    returnItems, onConfirm, onCancel, isLoading 
 }) => {
     const [verifiedAssetIds, setVerifiedAssetIds] = useState<string[]>([]);
 
     useEffect(() => {
-        setVerifiedAssetIds(assetsToVerify.map(a => a.id));
-    }, [assetsToVerify]);
+        // Default: Select all for convenience
+        setVerifiedAssetIds(returnItems.map(item => item.assetId));
+    }, [returnItems]);
 
     const handleToggleAsset = (assetId: string) => {
         setVerifiedAssetIds(prev =>
@@ -29,15 +30,15 @@ export const ReturnVerificationPanel: React.FC<ReturnVerificationPanelProps> = (
     };
 
     const handleToggleAll = () => {
-        if (verifiedAssetIds.length === assetsToVerify.length) {
+        if (verifiedAssetIds.length === returnItems.length) {
             setVerifiedAssetIds([]);
         } else {
-            setVerifiedAssetIds(assetsToVerify.map(a => a.id));
+            setVerifiedAssetIds(returnItems.map(item => item.assetId));
         }
     };
 
-    const isAllSelected = verifiedAssetIds.length > 0 && verifiedAssetIds.length === assetsToVerify.length;
-    const isIndeterminate = verifiedAssetIds.length > 0 && verifiedAssetIds.length < assetsToVerify.length;
+    const isAllSelected = verifiedAssetIds.length > 0 && verifiedAssetIds.length === returnItems.length;
+    const isIndeterminate = verifiedAssetIds.length > 0 && verifiedAssetIds.length < returnItems.length;
 
     return (
         <div className="bg-white border-2 border-green-100 rounded-xl shadow-xl animate-fade-in-up relative mt-8">
@@ -60,28 +61,32 @@ export const ReturnVerificationPanel: React.FC<ReturnVerificationPanelProps> = (
                 <div className="flex items-center gap-3 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100" onClick={handleToggleAll}>
                     <Checkbox id="verify-all-assets" checked={isAllSelected} indeterminate={isIndeterminate} onChange={() => {}} />
                     <label htmlFor="verify-all-assets" className="text-sm font-semibold text-gray-700 cursor-pointer">
-                        {isAllSelected ? 'Hapus Semua Centang' : 'Centang Semua'} ({verifiedAssetIds.length}/{assetsToVerify.length})
+                        {isAllSelected ? 'Hapus Semua Centang' : 'Centang Semua'} ({verifiedAssetIds.length}/{returnItems.length})
                     </label>
                 </div>
 
                 <div className="max-h-[40vh] overflow-y-auto custom-scrollbar space-y-2 pr-2 -mr-2">
-                    {assetsToVerify.map(asset => {
-                        const isVerified = verifiedAssetIds.includes(asset.id);
+                    {returnItems.map(item => {
+                        const isVerified = verifiedAssetIds.includes(item.assetId);
                         return (
                             <div 
-                                key={asset.id} 
-                                onClick={() => handleToggleAsset(asset.id)} 
+                                key={item.assetId} 
+                                onClick={() => handleToggleAsset(item.assetId)} 
                                 className={`flex items-start gap-4 p-3 border rounded-lg cursor-pointer transition-all ${isVerified ? 'bg-white border-gray-200 hover:border-gray-300' : 'bg-red-50/50 border-red-200'}`}
                             >
                                 <div className="mt-1">
-                                    <Checkbox id={`verify-${asset.id}`} checked={isVerified} onChange={() => {}} />
+                                    <Checkbox id={`verify-${item.assetId}`} checked={isVerified} onChange={() => {}} />
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <p className={`text-sm font-bold ${isVerified ? 'text-gray-800' : 'text-red-900 line-through'}`}>{asset.name}</p>
-                                    <p className={`text-xs font-mono mt-0.5 ${isVerified ? 'text-gray-500' : 'text-red-500'}`}>{asset.id}</p>
-                                </div>
-                                <div className={`flex-shrink-0 px-2 py-0.5 text-[10px] font-bold rounded-full border ${isVerified ? 'bg-green-50 text-green-700 border-green-100' : 'bg-red-100 text-red-700 border-red-200'}`}>
-                                    {isVerified ? 'DITERIMA' : 'DITOLAK'}
+                                    <div className="flex justify-between items-start">
+                                        <p className={`text-sm font-bold ${isVerified ? 'text-gray-800' : 'text-red-900 line-through'}`}>{item.assetName}</p>
+                                        <div className={`flex-shrink-0 px-2 py-0.5 text-[10px] font-bold rounded-full border ${isVerified ? 'bg-green-50 text-green-700 border-green-100' : 'bg-red-100 text-red-700 border-red-200'}`}>
+                                            {isVerified ? 'DITERIMA' : 'DITOLAK'}
+                                        </div>
+                                    </div>
+                                    <p className={`text-xs font-mono mt-0.5 ${isVerified ? 'text-gray-500' : 'text-red-500'}`}>{item.assetId}</p>
+                                    <p className="text-xs text-gray-500 mt-1">Kondisi user: <span className="font-medium">{item.returnedCondition}</span></p>
+                                    {item.notes && <p className="text-xs text-gray-400 italic">"{item.notes}"</p>}
                                 </div>
                             </div>
                         );

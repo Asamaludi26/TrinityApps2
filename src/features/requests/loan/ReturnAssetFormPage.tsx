@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { User, Asset, LoanRequest, AssetCondition, Division } from '../../../types';
 import { useNotification } from '../../../providers/NotificationProvider';
@@ -8,7 +9,6 @@ import DatePicker from '../../../components/ui/DatePicker';
 import FloatingActionBar from '../../../components/ui/FloatingActionBar';
 import { SpinnerIcon } from '../../../components/icons/SpinnerIcon';
 import { CustomSelect } from '../../../components/ui/CustomSelect';
-import { ClickableLink } from '../../../components/ui/ClickableLink';
 import { Checkbox } from '../../../components/ui/Checkbox';
 
 // Stores
@@ -69,7 +69,6 @@ const ReturnAssetFormPage: React.FC<ReturnAssetFormPageProps> = ({
         setDocNumber(newDocNumber);
     }, [returnDate, returns]);
     
-    // Observer for Floating Action Bar
     useEffect(() => {
         const observer = new IntersectionObserver(([entry]) => setIsFooterVisible(entry.isIntersecting), { threshold: 0.1 });
         const currentRef = footerRef.current;
@@ -106,14 +105,15 @@ const ReturnAssetFormPage: React.FC<ReturnAssetFormPageProps> = ({
 
         setIsSubmitting(true);
         try {
+            // Bundle all items into one submission
             const returnItemsPayload = selectedAssetIds.map(assetId => ({
                 assetId,
-                condition: returnDetails[assetId].condition,
-                notes: returnDetails[assetId].notes,
+                condition: returnDetails[assetId]?.condition || AssetCondition.USED_OKAY,
+                notes: returnDetails[assetId]?.notes || '',
             }));
 
             await submitReturnRequest(loanRequest.id, returnItemsPayload);
-            addNotification(`Pengajuan pengembalian berhasil dibuat.`, 'success');
+            addNotification(`Pengajuan pengembalian berhasil dibuat (Dokumen: ${docNumber}).`, 'success');
         } catch (error: any) {
             addNotification(error.message || 'Gagal mengajukan pengembalian.', 'error');
         } finally {
@@ -126,7 +126,7 @@ const ReturnAssetFormPage: React.FC<ReturnAssetFormPageProps> = ({
             <button type="button" onClick={onCancel} className="px-5 py-2 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50">Batal</button>
             <button type="submit" form={formId} disabled={isSubmitting || selectedAssetIds.length === 0} className="inline-flex items-center justify-center px-6 py-2.5 text-sm font-semibold text-white transition-all duration-200 rounded-lg shadow-sm bg-tm-primary hover:bg-tm-primary-hover disabled:bg-tm-primary/70">
                 {isSubmitting ? <SpinnerIcon className="w-4 h-4 mr-2" /> : null}
-                Ajukan Pengembalian ({selectedAssetIds.length})
+                Ajukan Pengembalian ({selectedAssetIds.length} Item)
             </button>
         </>
     );
@@ -160,6 +160,7 @@ const ReturnAssetFormPage: React.FC<ReturnAssetFormPageProps> = ({
                                             <div className="flex-1">
                                                 <label htmlFor={`select-${asset.id}`} className="font-semibold text-gray-800 cursor-pointer">{asset.name}</label>
                                                 <p className="text-xs text-gray-500 font-mono">{asset.id} / SN: {asset.serialNumber || 'N/A'}</p>
+                                                
                                                 <div className={`mt-3 space-y-3 transition-all duration-300 ease-in-out overflow-hidden ${isSelected ? 'max-h-40 opacity-100 pt-3 border-t' : 'max-h-0 opacity-0'}`}>
                                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                                         <div>

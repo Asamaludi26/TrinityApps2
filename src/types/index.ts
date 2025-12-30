@@ -1,5 +1,4 @@
 
-
 export type Page = 
   | 'dashboard' 
   | 'request' 
@@ -140,7 +139,8 @@ export enum LoanRequestStatus {
 
 export enum AssetReturnStatus {
   PENDING_APPROVAL = 'Menunggu Verifikasi',
-  APPROVED = 'Diterima',
+  APPROVED = 'Disetujui Sebagian', // Modified for clarity
+  COMPLETED = 'Selesai Diverifikasi',
   REJECTED = 'Ditolak'
 }
 
@@ -387,24 +387,36 @@ export interface LoanRequest {
     }>;
 }
 
+// --- REFACTORED RETURN TYPES ---
+
+export interface AssetReturnItem {
+    assetId: string;
+    assetName: string;
+    returnedCondition: AssetCondition;
+    notes?: string;
+    status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
+    verificationNotes?: string;
+}
+
 export interface AssetReturn {
-    id: string;
+    id: string; // Document ID
     docNumber: string;
     returnDate: string;
     loanRequestId: string;
-    loanDocNumber: string;
-    assetId: string;
-    assetName: string;
     returnedBy: string;
-    receivedBy: string;
-    returnedCondition: AssetCondition;
-    notes?: string;
-    status: AssetReturnStatus;
-    approvedBy?: string;
-    approvalDate?: string;
-    rejectedBy?: string;
-    rejectionDate?: string;
-    rejectionReason?: string;
+    
+    items: AssetReturnItem[]; // Array of items in this return doc
+    
+    status: AssetReturnStatus; // Document status
+    
+    // Approval/Verification fields
+    verifiedBy?: string;
+    verificationDate?: string;
+    
+    // Legacy fields kept optional for backward compat during migration if needed
+    // receivedBy?: string; 
+    // approvedBy?: string;
+    // approvalDate?: string;
 }
 
 export interface HandoverItem {

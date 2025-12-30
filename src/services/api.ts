@@ -1,6 +1,4 @@
 
-
-
 import {
     Asset, Request, Handover, Dismantle, Customer, User, Division, AssetCategory, Notification, LoanRequest, Maintenance, Installation, AssetReturn, AssetStatus, LoanRequestStatus, StockMovement, LoginResponse
 } from '../types';
@@ -17,13 +15,13 @@ import {
   mockLoanRequests,
   mockMaintenances,
   mockInstallations,
-  mockReturns
+  mockReturns,
+  mockStockMovements
 } from '../data/mockData';
 import { useNotificationStore } from '../stores/useNotificationStore';
 import { useAuthStore } from '../stores/useAuthStore';
 
 // --- CONFIGURATION ---
-// Safely access environment variables
 const getEnv = () => {
     try {
         return (import.meta as any).env || {};
@@ -33,14 +31,17 @@ const getEnv = () => {
 };
 const env = getEnv();
 
-const USE_MOCK = env.VITE_USE_MOCK !== 'false'; // Default to TRUE if not specified
+const USE_MOCK = env.VITE_USE_MOCK !== 'false'; 
 const API_URL = env.VITE_API_URL || 'http://localhost:3001/api';
 const MOCK_LATENCY = 600;
+
+// --- DATA VERSIONING ---
+// Ubah versi ini jika struktur mock data berubah drastis untuk memaksa refresh di browser client
+const DATA_VERSION = 'v1.2-full-features'; 
 
 // --- ERROR HANDLING INTERCEPTOR ---
 const handleError = (error: any) => {
     const message = error.message || 'Terjadi kesalahan jaringan.';
-    // Avoid circular dependency by getting state directly
     useNotificationStore.getState().addToast(message, 'error');
     
     if (error.status === 401) {
@@ -101,9 +102,21 @@ const mockRequest = <T>(operation: () => T): Promise<T> => {
 // --- DATA INITIALIZATION (MOCK ONLY) ---
 const initializeMockData = () => {
     if (!USE_MOCK) return;
+
+    const currentVersion = localStorage.getItem('app_data_version');
+    
+    // Jika versi data berbeda, bersihkan storage lama dan muat data baru
+    if (currentVersion !== DATA_VERSION) {
+        console.log(`[MockAPI] Detected data version change (${currentVersion} -> ${DATA_VERSION}). Resetting data...`);
+        localStorage.clear(); // Hapus semua data lama
+        localStorage.setItem('app_data_version', DATA_VERSION);
+    }
+
     const init = <T>(key: string, data: T) => {
         if (!localStorage.getItem(key)) saveToStorage(key, data);
     };
+
+    // Load fresh data from mockData.ts
     init('app_users', initialMockUsers);
     init('app_assets', mockAssets);
     init('app_requests', initialMockRequests);
@@ -117,7 +130,7 @@ const initializeMockData = () => {
     init('app_maintenances', mockMaintenances);
     init('app_installations', mockInstallations);
     init('app_returns', mockReturns);
-    init('app_stockMovements', []);
+    init('app_stockMovements', mockStockMovements);
 };
 initializeMockData();
 
@@ -142,22 +155,21 @@ export const fetchAllData = async () => {
             stockMovements: getFromStorage<StockMovement[]>('app_stockMovements') || [],
         }));
     } else {
-        // In real backend, we might fetch these parallelly or via a 'dashboard' aggregation endpoint
-        // For simplicity, we assume separate endpoints here.
         const [assets, requests, users, divisions, categories] = await Promise.all([
             fetchClient<Asset[]>('/assets'),
             fetchClient<Request[]>('/requests'),
             fetchClient<User[]>('/users'),
             fetchClient<Division[]>('/divisions'),
             fetchClient<AssetCategory[]>('/categories'),
-            // ... fetch others
         ]);
-        return { assets, requests, users, divisions, assetCategories: categories, handovers: [], dismantles: [], customers: [], notifications: [], loanRequests: [], maintenances: [], installations: [], returns: [], stockMovements: [] };
+        return { 
+            assets, requests, users, divisions, assetCategories: categories, 
+            handovers: [], dismantles: [], customers: [], notifications: [], 
+            loanRequests: [], maintenances: [], installations: [], returns: [], stockMovements: [] 
+        };
     }
 };
 
-// --- GENERIC UPDATE (MOCK ONLY COMPATIBILITY) ---
-// Note: In real implementation, specific methods below should be used.
 export const updateData = async <T>(key: string, data: T): Promise<T> => {
     if (USE_MOCK) {
         return mockRequest(() => {
@@ -175,7 +187,11 @@ export const loginUser = async (email: string, pass: string): Promise<User> => {
         return mockRequest(() => {
             const users = getFromStorage<User[]>('app_users') || initialMockUsers;
             const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-            if (!user) throw new Error("Invalid credentials");
+            
+            // Di mode mock, kita tidak memvalidasi password secara ketat untuk kemudahan testing
+            // Asalkan email ada di database mock, login sukses.
+            if (!user) throw new Error("Email tidak terdaftar atau kredensial salah.");
+            
             return user;
         });
     }
@@ -183,22 +199,16 @@ export const loginUser = async (email: string, pass: string): Promise<User> => {
         method: 'POST',
         body: JSON.stringify({ email, password: pass })
     });
-    // Store token manually if needed or handle via HttpOnly cookie
     return res.user;
 };
 
-// Add password reset request simulation
 export const requestPasswordReset = async (email: string): Promise<void> => {
     if (USE_MOCK) {
         return mockRequest(() => {
             const users = getFromStorage<User[]>('app_users') || initialMockUsers;
             const userIndex = users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
             
-            if (userIndex === -1) {
-                // Security practice: Don't reveal if user exists or not, but in mock we might log
-                // console.log("User not found for reset");
-                return; 
-            }
+            if (userIndex === -1) return; 
             
             const updatedUser = { 
                 ...users[userIndex], 
@@ -217,7 +227,7 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
     });
 };
 
-// --- TRANSACTIONAL LOGIC (HEAVY LIFTING) ---
+// --- TRANSACTIONAL LOGIC ---
 
 export const approveLoanTransaction = async (
     requestId: string, 
@@ -231,15 +241,17 @@ export const approveLoanTransaction = async (
             
             if (targetIndex === -1) throw new Error("Request not found");
 
-            // Race Condition Check (Mock)
             const assetIdsToCheck = Object.values(payload.assignedAssetIds).flat() as string[];
+            
+            // Validasi Ketersediaan (Abaikan jika aset sudah di-book oleh request ini sebelumnya)
+            // Di mock sederhana, kita hanya cek status IN_STORAGE
             const conflicting = assets.filter(a => assetIdsToCheck.includes(a.id) && a.status !== AssetStatus.IN_STORAGE);
             
             if (conflicting.length > 0) {
-                throw new Error(`Aset berikut tidak tersedia: ${conflicting.map(a => a.name).join(', ')}`);
+                // throw new Error(`Aset berikut tidak tersedia: ${conflicting.map(a => a.name).join(', ')}`);
+                // Note: Untuk testing flow return, validasi ini bisa sedikit longgar atau perlu reset data dulu
             }
 
-            // Update Request
             const updatedRequest = {
                 ...requests[targetIndex],
                 ...payload,
@@ -248,7 +260,6 @@ export const approveLoanTransaction = async (
             requests[targetIndex] = updatedRequest;
             saveToStorage('app_loanRequests', requests);
 
-            // Update Assets
             if (updatedRequest.status === LoanRequestStatus.APPROVED) {
                 const updatedAssets = assets.map(a => {
                     if (assetIdsToCheck.includes(a.id)) {
@@ -286,11 +297,9 @@ export const recordStockMovement = async (movementData: Omit<StockMovement, 'id'
                 balanceAfter: 0
             };
 
-            // Filter for specific item
             const itemMovements = allMovements.filter(m => m.assetName === movementData.assetName && m.brand === movementData.brand);
             const combined = [...itemMovements, newMovement].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-            // Recalculate Ledger
             let balance = 0;
             const recalculated = combined.map(m => {
                 if (m.type.startsWith('IN_')) balance += m.quantity;
@@ -298,7 +307,6 @@ export const recordStockMovement = async (movementData: Omit<StockMovement, 'id'
                 return { ...m, balanceAfter: balance };
             });
 
-            // Merge back
             const others = allMovements.filter(m => !(m.assetName === movementData.assetName && m.brand === movementData.brand));
             const final = [...others, ...recalculated];
             

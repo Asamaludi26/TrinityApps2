@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo } from "react";
 import { AssetReturn, User } from "../../../../types";
 import Modal from "../../../../components/ui/Modal";
@@ -74,24 +73,25 @@ export const ExportReturnRequestModal: React.FC<ExportReturnRequestModalProps> =
   }, [data, rangeType, startDate, endDate]);
 
   const prepareMappedData = (returns: AssetReturn[]) => {
-    return returns.map((ret, index) => {
+    // Flatten items so each item is a row in CSV, repeating parent doc info
+    return returns.flatMap((ret, index) => {
       const fmtDate = (d?: string | null) => d ? new Date(d).toLocaleDateString('id-ID', { 
         day: '2-digit', month: '2-digit', year: 'numeric' 
       }) : '-';
 
-      return {
+      return ret.items.map(item => ({
         'NO': index + 1,
         'ID PENGEMBALIAN': ret.docNumber,
         'TANGGAL KEMBALI': fmtDate(ret.returnDate),
-        'ID PINJAMAN (REF)': ret.loanDocNumber,
-        'NAMA ASET': ret.assetName,
-        'ID ASET': ret.assetId,
+        'ID PINJAMAN (REF)': ret.loanRequestId,
+        'NAMA ASET': item.assetName,
+        'ID ASET': item.assetId,
         'DIKEMBALIKAN OLEH': ret.returnedBy,
-        'DITERIMA OLEH': ret.receivedBy,
-        'KONDISI': ret.returnedCondition,
-        'STATUS': ret.status,
-        'CATATAN': ret.notes || '-'
-      };
+        'DITERIMA OLEH': ret.verifiedBy || '-',
+        'KONDISI': item.returnedCondition,
+        'STATUS': item.status,
+        'CATATAN': item.notes || '-'
+      }));
     });
   };
 
@@ -186,7 +186,7 @@ export const ExportReturnRequestModal: React.FC<ExportReturnRequestModalProps> =
                         <span className="text-[9px] text-slate-500 uppercase font-bold tracking-widest">Total Data</span>
                         <p className="text-xl font-bold text-white leading-none">
                             {filteredData.length} 
-                            <span className="text-[10px] font-medium text-slate-500 ml-1.5">baris</span>
+                            <span className="text-[10px] font-medium text-slate-500 ml-1.5">dokumen</span>
                         </p>
                     </div>
                 </div>
