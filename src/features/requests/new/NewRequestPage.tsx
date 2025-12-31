@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Request,
@@ -33,7 +32,8 @@ import { exportToCSV } from "../../../utils/csvExporter";
 import { BsJournalBookmark, BsArrowRight } from "react-icons/bs";
 import { ChevronLeftIcon } from "../../../components/icons/ChevronLeftIcon";
 import { ArchiveBoxIcon } from "../../../components/icons/ArchiveBoxIcon";
-import { prepareInitialItems } from "./utils/requestHelpers"; // Import Helper
+import { prepareInitialItems } from "./utils/requestHelpers"; 
+import { StagingModal } from "./components/StagingModal"; // Import Component Baru
 
 interface NewRequestPageProps {
   currentUser: User;
@@ -337,50 +337,15 @@ const NewRequestPage: React.FC<NewRequestPageProps> = ({
     }
   };
   
-  const stagingItems = useMemo(() => {
-    if (!stagingRequest) return [];
-    return stagingRequest.items.filter(item => {
-      const status = stagingRequest.itemStatuses?.[item.id];
-      if (status?.status === 'rejected') return false;
-      const approvedQty = status?.approvedQuantity ?? item.quantity;
-      return approvedQty > 0;
-    });
-  }, [stagingRequest]);
-
   const handleOpenStaging = (request: Request) => {
-    const hasItems = request.items.some(i => {
-        const status = request.itemStatuses?.[i.id];
-        if (status?.status === 'stock_allocated' || status?.status === 'rejected') return false;
-        const approvedQty = status?.approvedQuantity ?? i.quantity;
-        const registeredQty = request.partiallyRegisteredItems?.[i.id] || 0;
-        return registeredQty < approvedQty;
-    });
-
-    if (hasItems) {
-        setStagingRequest(request);
-    } else {
-        addNotificationUI('Semua item dalam request ini sudah dicatat atau dialokasikan dari stok.', 'info');
-    }
+      setStagingRequest(request);
   };
 
-  const handleProceedToRegistration = () => {
-    if (!stagingRequest) return;
-    
-    const itemToRegister = stagingRequest.items.find(i => {
-        const status = stagingRequest.itemStatuses?.[i.id];
-        if (status?.status === 'stock_allocated' || status?.status === 'rejected') return false;
-        const approvedQty = status?.approvedQuantity ?? i.quantity;
-        const registeredQty = stagingRequest.partiallyRegisteredItems?.[i.id] || 0;
-        return registeredQty < approvedQty;
-    });
-
-    if (itemToRegister) {
-        setStagingRequest(null);
-        onInitiateRegistration(stagingRequest, itemToRegister);
-    } else {
-        setStagingRequest(null);
-        addNotificationUI('Tidak ada item yang perlu dicatat.', 'info');
-    }
+  const handleProceedFromStaging = (itemToRegister: any) => {
+      if (stagingRequest) {
+          setStagingRequest(null);
+          onInitiateRegistration(stagingRequest, itemToRegister);
+      }
   };
 
   return (
@@ -601,66 +566,14 @@ const NewRequestPage: React.FC<NewRequestPageProps> = ({
         </Modal>
       )}
       
-      {/* Staging Modal */}
-      <Modal 
-        isOpen={!!stagingRequest} 
-        onClose={() => setStagingRequest(null)} 
-        title="Penerimaan Barang" 
-        size="lg" 
-        hideDefaultCloseButton 
-        footerContent={
-            <div className="flex justify-end gap-3 w-full">
-                 <button onClick={() => setStagingRequest(null)} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50">Batal</button>
-                 <button onClick={handleProceedToRegistration} disabled={stagingItems.length === 0} className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-tm-primary rounded-lg shadow-sm hover:bg-tm-primary-hover disabled:bg-gray-300 disabled:cursor-not-allowed">Lanjut Catat Aset</button>
-            </div>
-        }
-      >
-        <div className="space-y-4">
-             <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg flex items-start gap-3">
-                <ArchiveBoxIcon className="w-6 h-6 text-tm-primary flex-shrink-0 mt-0.5" />
-                <div>
-                    <h4 className="font-bold text-tm-primary text-sm">Konfirmasi Penerimaan</h4>
-                    <p className="text-sm text-blue-800 mt-1">
-                        Berikut adalah daftar item dari request <strong>{stagingRequest?.id}</strong> yang telah disetujui dan siap untuk dicatat ke dalam sistem inventori. Pastikan fisik barang telah diterima.
-                    </p>
-                </div>
-            </div>
-
-            <div className="border border-slate-200 rounded-lg overflow-hidden">
-                <table className="w-full text-sm text-left">
-                    <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
-                        <tr>
-                            <th className="p-3 w-10 text-center">No</th>
-                            <th className="p-3">Nama Barang</th>
-                            <th className="p-3">Tipe/Brand</th>
-                            <th className="p-3 text-center">Jumlah Diterima</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                        {stagingItems.length > 0 ? stagingItems.map((item, idx) => {
-                            const approvedQty = stagingRequest?.itemStatuses?.[item.id]?.approvedQuantity ?? item.quantity;
-                            return (
-                                <tr key={item.id} className="hover:bg-slate-50">
-                                    <td className="p-3 text-center text-slate-500">{idx + 1}</td>
-                                    <td className="p-3 font-semibold text-slate-800">{item.itemName}</td>
-                                    <td className="p-3 text-slate-600">{item.itemTypeBrand}</td>
-                                    <td className="p-3 text-center font-bold text-tm-primary bg-blue-50/50">{approvedQty} Unit</td>
-                                </tr>
-                            );
-                        }) : (
-                            <tr>
-                                 <td colSpan={4} className="p-6 text-center text-slate-500 italic">Tidak ada item yang dapat dicatat (Semua item ditolak atau belum disetujui).</td>
-                             </tr>
-                        )}
-                    </tbody>
-                </table>
-            </div>
-            
-            <p className="text-xs text-slate-500 text-center italic mt-2">
-                Klik "Lanjut Catat Aset" untuk mulai memasukkan Nomor Seri dan data detail lainnya.
-            </p>
-        </div>
-      </Modal>
+      {/* Gunakan StagingModal yang baru */}
+      <StagingModal 
+          isOpen={!!stagingRequest}
+          onClose={() => setStagingRequest(null)}
+          request={stagingRequest}
+          categories={categories}
+          onProceed={handleProceedFromStaging}
+      />
     </div>
   );
 };

@@ -189,6 +189,38 @@ export const initialMockRequests: Request[] = [
         purchaseDetails: { 1: { purchasePrice: 8500000, vendor: 'Bhinneka', poNumber: 'PO-099', invoiceNumber: 'INV-099', purchaseDate: d(-2), warrantyEndDate: d(365), filledBy: 'Admin Purchase', fillDate: d(-2) } },
         arrivalDate: d(0),
         activityLog: []
+    },
+    // Case 4: NEW TESTING REQUEST (4 Assets, Qty 2 each, Status: ARRIVED to allow Registration Testing)
+    {
+        id: generateId('RO', -2, '0005'),
+        docNumber: generateId('RO', -2, '0005'),
+        requester: 'Leader Network',
+        division: 'Network Engineering',
+        requestDate: d(-2),
+        status: ItemStatus.ARRIVED, // Set ke ARRIVED agar tombol "Catat Aset" muncul
+        logisticApprover: 'Admin Logistik', logisticApprovalDate: d(-1),
+        finalApprover: 'Super Admin', finalApprovalDate: d(-1),
+        order: { type: 'Project Based', project: 'Upgrade Infrastruktur Server' },
+        items: [
+            { id: 1, itemName: 'Mikrotik CCR1009', itemTypeBrand: 'Mikrotik', quantity: 2, keterangan: 'Main & Backup Router', categoryId: '1', typeId: '11' },
+            { id: 2, itemName: 'Cisco Catalyst 2960', itemTypeBrand: 'Cisco', quantity: 2, keterangan: 'Distribution Switch', categoryId: '1', typeId: '12' },
+            { id: 3, itemName: 'Unifi AP AC Lite', itemTypeBrand: 'Ubiquiti', quantity: 2, keterangan: 'WiFi Area Kantor', categoryId: '2', typeId: '22' },
+            { id: 4, itemName: 'OTDR MaxTester', itemTypeBrand: 'Exfo', quantity: 2, keterangan: 'Alat ukur tim lapangan', categoryId: '4', typeId: '42' }
+        ],
+        itemStatuses: {
+            1: { status: 'approved', approvedQuantity: 2 },
+            2: { status: 'approved', approvedQuantity: 2 },
+            3: { status: 'approved', approvedQuantity: 2 },
+            4: { status: 'approved', approvedQuantity: 2 }
+        },
+        purchaseDetails: {
+             1: { purchasePrice: 7500000, vendor: 'Citra Web', poNumber: 'PO-TEST-001', invoiceNumber: 'INV-001', purchaseDate: d(-1), filledBy: 'Admin Purchase', fillDate: d(-1) },
+             2: { purchasePrice: 5000000, vendor: 'Partner Cisco', poNumber: 'PO-TEST-001', invoiceNumber: 'INV-001', purchaseDate: d(-1), filledBy: 'Admin Purchase', fillDate: d(-1) },
+             3: { purchasePrice: 1500000, vendor: 'Ubiquiti Store', poNumber: 'PO-TEST-001', invoiceNumber: 'INV-001', purchaseDate: d(-1), filledBy: 'Admin Purchase', fillDate: d(-1) },
+             4: { purchasePrice: 45000000, vendor: 'Exfo Indo', poNumber: 'PO-TEST-001', invoiceNumber: 'INV-001', purchaseDate: d(-1), filledBy: 'Admin Purchase', fillDate: d(-1) },
+        },
+        arrivalDate: d(0),
+        activityLog: []
     }
 ];
 

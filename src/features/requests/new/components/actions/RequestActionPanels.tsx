@@ -183,13 +183,16 @@ export const ProcurementActions: React.FC<{ request: Request; currentUser: User;
 
 // --- 5. ARRIVAL & HANDOVER ACTIONS ---
 export const ArrivalActions: React.FC<{ request: Request; currentUser: User; uiProps: any }> = ({ request, currentUser, uiProps }) => {
-    const { onOpenStaging, onInitiateHandoverFromRequest, isLoading } = uiProps;
+    const { onOpenStaging, onInitiateHandoverFromRequest, isLoading, isStagingComplete } = uiProps;
     const canManageAssets = hasPermission(currentUser, 'assets:create');
     const canManageHandover = hasPermission(currentUser, 'assets:handover');
     const canApproveFinal = hasPermission(currentUser, 'requests:approve:final'); // CEO bisa bypass
 
     if (request.status === ItemStatus.ARRIVED) {
         if (canManageAssets || canApproveFinal) {
+            if (isStagingComplete) {
+                 return <ActionButton onClick={() => onOpenStaging(request)} disabled={isLoading} text="Selesai & Siap Handover" color="success" icon={CheckIcon} />;
+            }
             return <ActionButton onClick={() => onOpenStaging(request)} disabled={isLoading} text={LABELS.BTN_REGISTER_ASSET} color="primary" icon={RegisterIcon} />;
         }
         return <WaitingStateCard title={LABELS.MSG_ARRIVED} message={LABELS.MSG_DESC_ARRIVED} icon={ArchiveBoxIcon} />;

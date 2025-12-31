@@ -34,6 +34,8 @@ interface RequestStatusSidebarProps {
     onRequestProgressUpdate: (id: string) => void;
     onOpenStaging: (req: Request) => void;
     onInitiateHandoverFromRequest: (req: Request) => void;
+    // New prop for smart transition
+    isStagingComplete?: boolean;
 }
 
 export const RequestStatusSidebar: React.FC<RequestStatusSidebarProps> = (props) => {

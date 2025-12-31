@@ -18,7 +18,7 @@ import { hasPermission } from '../../../utils/permissions';
 import { useRequestStore } from '../../../stores/useRequestStore';
 import { useNotification } from '../../../providers/NotificationProvider';
 import { RequestStatusSidebar } from './components/RequestStatusSidebar';
-import { BsPerson, BsBuilding, BsCalendarEvent, BsHash, BsFileEarmarkText } from 'react-icons/bs';
+import { BsPerson, BsBuilding, BsCalendarEvent, BsHash, BsFileEarmarkText, BsCheckCircleFill } from 'react-icons/bs';
 import { ClickableLink } from '../../../components/ui/ClickableLink';
 import { PencilIcon } from '../../../components/icons/PencilIcon';
 import { ArchiveBoxIcon } from '../../../components/icons/ArchiveBoxIcon';
@@ -78,7 +78,6 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
     );
 
     // Initialize/Sync Purchase Details State
-    // FIXED: Removed initializedRef to allow sync if store updates
     useEffect(() => {
         if (request.purchaseDetails) {
              const mappedDetails: Record<number, Omit<PurchaseDetails, 'filledBy' | 'fillDate'>> = {};
@@ -101,6 +100,51 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
              }
         }
     }, [request.purchaseDetails]);
+
+    // --- LOGIC: Check Staging Completion ---
+    const isStagingComplete = useMemo(() => {
+        if (request.status !== ItemStatus.ARRIVED) return false;
+        
+        // Filter item yang perlu diproses (approved > 0 dan bukan alokasi stok lama/ditolak)
+        const itemsToProcess = request.items.filter(item => {
+            const status = request.itemStatuses?.[item.id];
+            if (status?.status === 'stock_allocated' || status?.status === 'rejected') return false;
+            const approvedQty = status?.approvedQuantity ?? item.quantity;
+            return approvedQty > 0;
+        });
+
+        if (itemsToProcess.length === 0) return true; // Tidak ada item yang perlu dicatat
+
+        // Cek apakah registered >= approved untuk semua item
+        return itemsToProcess.every(item => {
+            const approvedQty = request.itemStatuses?.[item.id]?.approvedQuantity ?? item.quantity;
+            const registeredQty = request.partiallyRegisteredItems?.[item.id] || 0;
+            return registeredQty >= approvedQty;
+        });
+    }, [request]);
+
+    // --- HANDLER: Smart Staging Action ---
+    const handleStagingAction = async () => {
+        if (isStagingComplete) {
+            // Jika sudah lengkap, tombol ini berfungsi untuk memajukan status ke AWAITING_HANDOVER
+            const updateActivity: Activity = {
+                id: Date.now(),
+                author: currentUser.name,
+                timestamp: new Date().toISOString(),
+                type: 'status_change',
+                payload: { text: 'Pencatatan aset selesai. Status diubah menjadi Siap Serah Terima.' }
+            };
+            
+            await updateRequest(request.id, { 
+                status: ItemStatus.AWAITING_HANDOVER,
+                activityLog: [updateActivity, ...(request.activityLog || [])]
+            });
+            addNotification("Status diperbarui: Siap Serah Terima.", "success");
+        } else {
+            // Jika belum lengkap, buka modal pencatatan biasa
+            onOpenStaging(request);
+        }
+    };
 
     // --- Comment Logic ---
     const [newComment, setNewComment] = useState('');
@@ -226,8 +270,6 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
 
              const itemsRequiringPurchase = request.items.filter(item => {
                 const itemStatus = request.itemStatuses?.[item.id];
-                // FIXED: Validasi harus mengecualikan item yang ditolak (approvedQuantity === 0)
-                // bukan hanya status === 'rejected' karena status bisa undefined di awal
                 const approvedQty = itemStatus?.approvedQuantity ?? item.quantity;
                 const isRejected = approvedQty === 0;
                 const isStockAllocated = itemStatus?.status === 'stock_allocated';
@@ -271,24 +313,34 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
     }, [itemPurchaseDetails, request, currentUser.role]);
 
     const calculatedTotalValue = useMemo(() => {
-        if (request.status === ItemStatus.LOGISTIC_APPROVED && hasPermission(currentUser, 'requests:approve:purchase')) {
-            return Object.values(itemPurchaseDetails).reduce((sum: number, details: Omit<PurchaseDetails, 'filledBy' | 'fillDate'>) => {
-                const price = Number(details.purchasePrice);
-                return sum + (isNaN(price) ? 0 : price);
-            }, 0);
-        }
+        let total = 0;
         
-        if (request.purchaseDetails) {
-            return Object.values(request.purchaseDetails).reduce((sum: number, details: PurchaseDetails) => {
-                const price = Number(details.purchasePrice);
-                return sum + (isNaN(price) ? 0 : price);
-            }, 0);
+        const sourceDetails = (request.status === ItemStatus.LOGISTIC_APPROVED && hasPermission(currentUser, 'requests:approve:purchase'))
+            ? itemPurchaseDetails
+            : (request.purchaseDetails || {});
+            
+        Object.entries(sourceDetails).forEach(([itemIdStr, details]) => {
+            const itemId = Number(itemIdStr);
+            const item = request.items.find(i => i.id === itemId);
+            
+            if (item) {
+                const itemStatus = request.itemStatuses?.[itemId];
+                const quantity = itemStatus?.approvedQuantity ?? item.quantity;
+                const unitPrice = Number((details as any).purchasePrice);
+                
+                if (!isNaN(unitPrice)) {
+                    total += unitPrice * quantity;
+                }
+            }
+        });
+
+        if (total === 0 && request.totalValue) {
+            return request.totalValue;
         }
-    
-        return request.totalValue || 0;
+
+        return total;
     }, [request, itemPurchaseDetails, currentUser]);
     
-    // Wrapped in useCallback to prevent infinite loops in child components
     const handlePurchaseDetailChange = useCallback((itemId: number, details: Omit<PurchaseDetails, 'filledBy' | 'fillDate'>) => {
         setItemPurchaseDetails(prev => ({
             ...prev,
@@ -308,12 +360,10 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
     const isCommentDisabled = [ItemStatus.COMPLETED, ItemStatus.REJECTED, ItemStatus.CANCELLED].includes(request.status);
     const canViewPrice = hasPermission(currentUser, 'requests:approve:purchase');
     
-    // Helper to check if any item needs purchase details form
     const hasItemsToProcess = useMemo(() => {
         return request.items.some(item => {
              const status = request.itemStatuses?.[item.id];
              const approvedQty = status?.approvedQuantity ?? item.quantity;
-             // Must handle purchase detail if approved > 0 AND not stock allocated
              return approvedQty > 0 && status?.status !== 'stock_allocated';
         });
     }, [request]);
@@ -340,7 +390,10 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                     onFinalSubmit={handleFinalSubmitForApproval}
                     isPurchaseFormValid={isPurchaseFormValid}
                     onOpenCancellationModal={() => setIsCancelModalOpen(true)}
-                    onOpenStaging={() => onOpenStaging(request)} 
+                    // REFACTOR: Use Smart Handler here instead of raw onOpenStaging
+                    onOpenStaging={handleStagingAction} 
+                    // REFACTOR: Pass calculated state to sidebar for UI logic
+                    isStagingComplete={isStagingComplete}
                 />
             }
         >
@@ -355,6 +408,22 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                             <div>
                                 <p className="font-bold uppercase tracking-wide text-xs mb-1">Perhatian</p>
                                 <p>Permintaan ini telah diprioritaskan oleh CEO pada <strong>{new Date(request.ceoDispositionDate!).toLocaleString('id-ID')}</strong>.</p>
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* NEW: Staging Complete Notification */}
+                    {isStagingComplete && request.status === ItemStatus.ARRIVED && (
+                        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 shadow-sm animate-fade-in-down no-print">
+                            <div className="flex items-start gap-3">
+                                <CheckIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                                <div>
+                                    <p className="font-bold uppercase tracking-wide text-xs mb-1">Pencatatan Selesai</p>
+                                    <p className="text-sm">
+                                        Seluruh item telah selesai dicatat/dialokasikan. 
+                                        Silakan klik tombol <strong>"Selesai & Siap Handover"</strong> di sidebar kanan untuk mengubah status menjadi <strong>Siap Serah Terima</strong>.
+                                    </p>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -402,8 +471,10 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                 <thead className="bg-slate-50 text-[10px] uppercase font-extrabold text-slate-500 border-b border-slate-200 tracking-wider">
                                     <tr>
                                         <th className="p-4 w-14 text-center">No.</th>
+                                        <th className="p-4">Kategori</th>
+                                        <th className="p-4">Tipe</th>
                                         <th className="p-4">Nama Barang</th>
-                                        <th className="p-4">Tipe/Brand</th>
+                                        <th className="p-4">Brand</th>
                                         <th className="p-4 text-center w-32">Jumlah</th>
                                         <th className="p-4">Keterangan</th>
                                     </tr>
@@ -413,11 +484,50 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                         const itemStatus = request.itemStatuses?.[item.id];
                                         const approvedQuantity = itemStatus?.approvedQuantity;
                                         const isAdjusted = typeof approvedQuantity === 'number';
-                                        // Rejected if qty explicitly set to 0
+                                        
                                         const isRejected = isAdjusted && approvedQuantity === 0;
                                         const isPartiallyApproved = isAdjusted && approvedQuantity! > 0 && approvedQuantity! < item.quantity;
                                         const isStockAllocated = itemStatus?.status === 'stock_allocated';
                                         
+                                        // 1. Resolve Category & Type logic
+                                        let categoryName = '-';
+                                        let typeName = '-';
+
+                                        // Strategy A: Lookup by ID (Strong Link)
+                                        if (item.categoryId) {
+                                            const cat = assetCategories.find(c => c.id.toString() === item.categoryId?.toString());
+                                            if (cat) {
+                                                categoryName = cat.name;
+                                                if (item.typeId) {
+                                                    const typ = cat.types.find(t => t.id.toString() === item.typeId?.toString());
+                                                    if (typ) typeName = typ.name;
+                                                }
+                                            }
+                                        }
+
+                                        // Strategy B: Fallback Lookup by Name (Legacy Support)
+                                        if (categoryName === '-' || typeName === '-') {
+                                            for (const cat of assetCategories) {
+                                                for (const typ of cat.types) {
+                                                    const modelMatch = typ.standardItems?.some(
+                                                        m => m.name === item.itemName &&
+                                                             (m.brand === item.itemTypeBrand || item.itemTypeBrand === 'Generic')
+                                                    );
+                                                    if (modelMatch) {
+                                                        if (categoryName === '-') categoryName = cat.name;
+                                                        if (typeName === '-') typeName = typ.name;
+                                                        break;
+                                                    }
+                                                }
+                                                if (categoryName !== '-' && typeName !== '-') break;
+                                            }
+                                        }
+
+                                        // Cek progress registrasi per item
+                                        const registeredCount = request.partiallyRegisteredItems?.[item.id] || 0;
+                                        const targetQty = approvedQuantity ?? item.quantity;
+                                        const isItemFullyRegistered = !isRejected && !isStockAllocated && registeredCount >= targetQty && request.status === ItemStatus.ARRIVED;
+
                                         let rowClass = 'hover:bg-slate-50/50 transition-colors';
                                         if (isRejected) rowClass += ' bg-red-50/30 text-slate-400';
                                         else if (isPartiallyApproved) rowClass += ' bg-amber-50/30';
@@ -426,13 +536,18 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                         return (
                                             <tr key={item.id} className={rowClass}>
                                                 <td className="p-4 text-center font-normal text-slate-400">{index + 1}</td>
+                                                <td className="p-4 text-slate-600 font-normal text-xs">{categoryName}</td>
+                                                <td className="p-4 text-slate-600 font-normal text-xs">{typeName}</td>
                                                 <td className="p-4 font-semibold">
                                                     <div className="flex flex-col gap-1">
-                                                        <span className={isRejected ? 'line-through decoration-red-300' : 'text-slate-800 text-base font-normal'}>{item.itemName}</span>
-                                                        <div className="flex gap-2">
+                                                        <span className={isRejected ? 'line-through decoration-red-300' : 'text-slate-800 text-base font-normal'}>
+                                                            {item.itemName}
+                                                        </span>
+                                                        <div className="flex gap-2 flex-wrap">
                                                             {isPartiallyApproved && <span className="px-2 py-0.5 text-[9px] font-bold text-white bg-amber-500 rounded uppercase tracking-wider shadow-sm">Revisi</span>}
                                                             {isRejected && <span className="px-2 py-0.5 text-[9px] font-bold text-white bg-red-500 rounded uppercase tracking-wider shadow-sm">Ditolak</span>}
                                                             {isStockAllocated && <span className="px-2 py-0.5 text-[9px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-200 rounded uppercase tracking-wider shadow-sm">Stok</span>}
+                                                            {isItemFullyRegistered && <span className="px-2 py-0.5 text-[9px] font-bold text-blue-800 bg-blue-100 border border-blue-200 rounded uppercase tracking-wider shadow-sm flex items-center gap-1"><BsCheckCircleFill className="w-2.5 h-2.5" /> Terdaftar</span>}
                                                         </div>
                                                     </div>
                                                 </td>
@@ -463,7 +578,7 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                 {canViewPrice && (
                                      <tfoot className="bg-slate-50 border-t border-slate-200">
                                         <tr>
-                                            <td colSpan={5} className="p-4 text-center font-bold text-slate-800 text-base">
+                                            <td colSpan={7} className="p-4 text-center font-bold text-slate-800 text-base">
                                                 Estimasi Total: <span className="text-xl text-tm-primary ml-2 font-mono">Rp. {calculatedTotalValue.toLocaleString('id-ID')}</span>
                                             </td>
                                         </tr>
@@ -485,7 +600,7 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                     const isRejected = approvedQuantity === 0;
                                     const isStockAllocated = itemStatus?.status === 'stock_allocated';
 
-                                    if (isRejected) return null; // Don't show form for rejected items
+                                    if (isRejected) return null; 
 
                                     if (isStockAllocated) {
                                         return (
@@ -510,7 +625,6 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                         );
                                     }
 
-                                    // Normal Rendering for Purchase
                                     return (
                                         <ItemPurchaseDetailsForm 
                                             key={item.id} 

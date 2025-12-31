@@ -1,4 +1,3 @@
-
 import { create } from 'zustand';
 import { Request, LoanRequest, AssetReturn, ItemStatus, LoanRequestStatus, AssetReturnStatus, RequestItem, AssetStatus, Handover, AssetCondition } from '../types';
 import * as api from '../services/api';
@@ -103,6 +102,65 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   },
 
   updateRequestRegistration: async (requestId, itemId, count) => {
+    const currentRequests = get().requests;
+    const requestIndex = currentRequests.findIndex(r => r.id === requestId);
+    if (requestIndex === -1) return false;
+
+    const request = currentRequests[requestIndex];
+    
+    // 1. Update counter partial registration
+    const currentRegistered = request.partiallyRegisteredItems || {};
+    const newCount = (currentRegistered[itemId] || 0) + count;
+    const updatedRegistered = { ...currentRegistered, [itemId]: newCount };
+
+    // 2. Cek apakah seluruh item dalam request sudah terpenuhi (Selesai Dicatat)
+    // Logika: Semua item yang statusnya approved/partial dan > 0, harus memiliki registeredQty >= approvedQty
+    let isFullyComplete = true;
+    
+    request.items.forEach(item => {
+        const status = request.itemStatuses?.[item.id];
+        // Skip item yang ditolak atau dialokasikan dari stok lama (tidak butuh registrasi baru)
+        if (status?.status === 'rejected' || status?.status === 'stock_allocated') return;
+
+        const approvedQty = status?.approvedQuantity ?? item.quantity;
+        const regQty = updatedRegistered[item.id] || 0;
+
+        if (regQty < approvedQty) {
+            isFullyComplete = false;
+        }
+    });
+
+    // 3. Tentukan status selanjutnya
+    // Jika semua lengkap -> AWAITING_HANDOVER (Siap Serah Terima)
+    // Jika belum -> Tetap status lama (biasanya ARRIVED)
+    const nextStatus = isFullyComplete ? ItemStatus.AWAITING_HANDOVER : request.status;
+    const isRegisteredFlag = isFullyComplete; 
+
+    const updatedRequest = {
+        ...request,
+        partiallyRegisteredItems: updatedRegistered,
+        status: nextStatus,
+        isRegistered: isRegisteredFlag // Helper flag untuk UI
+    };
+
+    // 4. Jika status berubah jadi AWAITING_HANDOVER, tambahkan log aktivitas
+    if (nextStatus === ItemStatus.AWAITING_HANDOVER && request.status !== ItemStatus.AWAITING_HANDOVER) {
+         const activityLog = updatedRequest.activityLog || [];
+         activityLog.unshift({
+             id: Date.now(),
+             author: 'System',
+             timestamp: new Date().toISOString(),
+             type: 'status_change',
+             payload: { text: 'Seluruh item telah dicatat. Status diubah menjadi Siap Serah Terima.' }
+         });
+         updatedRequest.activityLog = activityLog;
+    }
+
+    const updatedRequests = [...currentRequests];
+    updatedRequests[requestIndex] = updatedRequest;
+
+    await api.updateData('app_requests', updatedRequests);
+    set({ requests: updatedRequests });
     return true;
   },
 
