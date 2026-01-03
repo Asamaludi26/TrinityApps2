@@ -100,7 +100,8 @@ export enum AssetStatus {
   OUT_FOR_REPAIR = 'Keluar (Service)',
   DAMAGED = 'Rusak',
   DECOMMISSIONED = 'Diberhentikan',
-  AWAITING_RETURN = 'Menunggu Pengembalian'
+  AWAITING_RETURN = 'Menunggu Pengembalian',
+  CONSUMED = 'Habis Terpakai' // New Status for empty measurement items
 }
 
 export enum AssetCondition {
@@ -212,15 +213,25 @@ export interface Asset {
     dismantleInfo?: any;
     lastModifiedDate?: string;
     lastModifiedBy?: string;
+    
+    // NEW: Fields for Measurement Tracking
+    initialBalance?: number; // Total awal (misal: 1000m)
+    currentBalance?: number; // Sisa saat ini (misal: 850m)
 }
 
 export type ItemClassification = 'asset' | 'material';
 export type TrackingMethod = 'individual' | 'bulk';
+export type BulkTrackingMode = 'count' | 'measurement'; 
 
 export interface StandardItem {
     id: number;
     name: string;
     brand: string;
+    // MOVED HERE: Define behavior for bulk items at model level
+    bulkType?: BulkTrackingMode; 
+    unitOfMeasure?: string;
+    baseUnitOfMeasure?: string;
+    quantityPerUnit?: number;
 }
 
 export interface AssetType {
@@ -229,8 +240,7 @@ export interface AssetType {
     classification?: ItemClassification;
     trackingMethod?: TrackingMethod;
     unitOfMeasure?: string;
-    baseUnitOfMeasure?: string;
-    quantityPerUnit?: number;
+    // Removed specific bulk configs from here
     standardItems?: StandardItem[];
 }
 

@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Page, User, Installation, PreviewData, ItemStatus, AssetStatus } from '../../../types';
+import { Page, User, Installation, PreviewData, ItemStatus, AssetStatus, InstalledMaterial } from '../../../types';
 import { useSortableData } from '../../../hooks/useSortableData';
 import { useGenericFilter } from '../../../hooks/useGenericFilter';
 import { useNotification } from '../../../providers/NotificationProvider';
@@ -40,7 +40,8 @@ const InstallationFormPage: React.FC<InstallationFormPageProps> = (props) => {
     const installations = useTransactionStore((state) => state.installations);
     const addInstallation = useTransactionStore((state) => state.addInstallation);
     
-    const assets = useAssetStore((state) => state.assets); // Need assets for stock lookup
+    const assets = useAssetStore((state) => state.assets);
+    const assetCategories = useAssetStore((state) => state.categories);
     const updateAsset = useAssetStore((state) => state.updateAsset);
     const customers = useMasterDataStore((state) => state.customers);
     const updateCustomer = useMasterDataStore((state) => state.updateCustomer);
@@ -129,18 +130,16 @@ const InstallationFormPage: React.FC<InstallationFormPageProps> = (props) => {
         setView('detail');
     };
 
-    // REFACTOR: Now receives docNumber from the form component
     const handleSave = async (installationData: Omit<Installation, 'id' | 'status'>) => {
         const newInstallation: Installation = {
             ...installationData,
-            id: `INST-${Date.now()}`, // Internal ID can be simple time based
+            id: `INST-${Date.now()}`,
             status: ItemStatus.COMPLETED,
-            // docNumber is already inside installationData
         };
         
         await addInstallation(newInstallation);
 
-        // 1. Update Assets Status (Perangkat)
+        // 1. Update Assets Status (Perangkat/Device)
         for (const item of installationData.assetsInstalled) {
             if (item.assetId) {
                 await updateAsset(item.assetId, {
@@ -152,12 +151,23 @@ const InstallationFormPage: React.FC<InstallationFormPageProps> = (props) => {
             }
         }
 
-        // 2. Update Stock for Materials (Consume Logic) & Customer Record
+        // 2. Update Stock for Materials (Smart Consume Logic)
         if (installationData.materialsUsed && installationData.materialsUsed.length > 0) {
              const customer = customers.find(c => c.id === installationData.customerId);
              
              // A. Consume Stock
              for (const mat of installationData.materialsUsed) {
+                // Identifikasi tipe measurement
+                let isMeasurement = false;
+                for (const cat of assetCategories) {
+                    for (const type of cat.types) {
+                        const model = type.standardItems?.find(i => i.name === mat.itemName && i.brand === mat.brand);
+                        if (model && model.bulkType === 'measurement') {
+                            isMeasurement = true;
+                        }
+                    }
+                }
+
                 const availableStock = assets
                     .filter(a => 
                         a.name === mat.itemName && 
@@ -166,17 +176,49 @@ const InstallationFormPage: React.FC<InstallationFormPageProps> = (props) => {
                     )
                     .sort((a, b) => new Date(a.registrationDate).getTime() - new Date(b.registrationDate).getTime());
 
-                const qtyToConsume = Math.min(mat.quantity, availableStock.length);
-                
-                if (qtyToConsume > 0) {
-                    const itemsToUpdate = availableStock.slice(0, qtyToConsume);
-                    for (const item of itemsToUpdate) {
-                         await updateAsset(item.id, {
-                            status: AssetStatus.IN_USE,
-                            currentUser: installationData.customerId,
-                            location: `Terpasang di: ${installationData.customerName}`,
-                            activityLog: [] 
-                        });
+                if (isMeasurement) {
+                    // MEASUREMENT LOGIC (KABEL)
+                    let remainingNeed = mat.quantity;
+                    
+                    for (const asset of availableStock) {
+                        if (remainingNeed <= 0) break;
+                        
+                        const currentBalance = asset.currentBalance ?? asset.initialBalance ?? 0;
+                        if (currentBalance <= 0) continue;
+
+                        if (currentBalance > remainingNeed) {
+                            // Partial Use -> Balance berkurang, Status TETAP IN_STORAGE
+                            const newBalance = currentBalance - remainingNeed;
+                            await updateAsset(asset.id, {
+                                currentBalance: newBalance,
+                                status: AssetStatus.IN_STORAGE,
+                                activityLog: []
+                            });
+                            remainingNeed = 0;
+                        } else {
+                            // Full Use of this reel -> Balance 0, Status CONSUMED
+                            const consumed = currentBalance;
+                            remainingNeed -= consumed;
+                            await updateAsset(asset.id, {
+                                currentBalance: 0,
+                                status: AssetStatus.CONSUMED,
+                                activityLog: []
+                            });
+                        }
+                    }
+                } else {
+                    // COUNT LOGIC (KONEKTOR)
+                    const qtyToConsume = Math.min(mat.quantity, availableStock.length);
+                    if (qtyToConsume > 0) {
+                        const itemsToUpdate = availableStock.slice(0, qtyToConsume);
+                        for (const item of itemsToUpdate) {
+                             await updateAsset(item.id, {
+                                status: AssetStatus.IN_USE,
+                                currentUser: installationData.customerId,
+                                location: `Terpasang di: ${installationData.customerName}`,
+                                activityLog: [] 
+                            });
+                        }
                     }
                 }
              }

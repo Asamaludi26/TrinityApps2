@@ -127,7 +127,8 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
                             tempId: Date.now() + idx,
                             modelKey: match.value,
                             quantity: 0, // Default 0, user tinggal isi jumlah
-                            unit: match.unit || 'pcs'
+                            // FIX: Gunakan unit dari materialOptions (yang sudah diperbaiki logicnya), jangan hardcode 'pcs'
+                            unit: match.unit || 'Pcs' 
                         });
                     }
                 });
@@ -231,18 +232,20 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
     };
     
     const handleAddMaterial = () => {
-        setMaterials(prev => [...prev, { tempId: Date.now(), modelKey: '', quantity: 1, unit: 'pcs' }]);
+        setMaterials(prev => [...prev, { tempId: Date.now(), modelKey: '', quantity: 1, unit: 'Pcs' }]);
     };
     const handleRemoveMaterial = (tempId: number) => {
         setMaterials(prev => prev.filter(m => m.tempId !== tempId));
     };
+    
     const handleMaterialChange = (tempId: number, field: keyof MaterialFormItem, value: any) => {
         setMaterials(prev => prev.map(item => {
             if (item.tempId === tempId) {
                 const updatedItem = { ...item, [field]: value };
                 if (field === 'modelKey') {
+                    // FIX: Saat material dipilih, update unit otomatis dari opsi
                     const model = materialOptions.find(opt => opt.value === value);
-                    updatedItem.unit = model?.unit || 'pcs';
+                    updatedItem.unit = model?.unit || 'Pcs';
                 }
                 return updatedItem;
             }

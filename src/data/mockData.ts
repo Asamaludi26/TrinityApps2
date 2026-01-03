@@ -72,31 +72,66 @@ export const initialAssetCategories: AssetCategory[] = [
     {
         id: 1, name: 'Perangkat Jaringan (Core)', isCustomerInstallable: false, associatedDivisions: [1, 2],
         types: [
-            { id: 11, name: 'Router Core', classification: 'asset', trackingMethod: 'individual', unitOfMeasure: 'Unit', standardItems: [{ id: 111, name: 'Mikrotik CCR1009', brand: 'Mikrotik' }] },
-            { id: 12, name: 'Switch Aggregation', classification: 'asset', trackingMethod: 'individual', unitOfMeasure: 'Unit', standardItems: [{ id: 121, name: 'Cisco Catalyst 2960', brand: 'Cisco' }] }
+            { id: 11, name: 'Router Core', classification: 'asset', trackingMethod: 'individual', standardItems: [{ id: 111, name: 'Mikrotik CCR1009', brand: 'Mikrotik' }] },
+            { id: 12, name: 'Switch Aggregation', classification: 'asset', trackingMethod: 'individual', standardItems: [{ id: 121, name: 'Cisco Catalyst 2960', brand: 'Cisco' }] }
         ]
     },
     {
         id: 2, name: 'Perangkat Pelanggan (CPE)', isCustomerInstallable: true, associatedDivisions: [3],
         types: [
-            { id: 21, name: 'ONT/ONU', classification: 'asset', trackingMethod: 'individual', unitOfMeasure: 'Unit', standardItems: [{ id: 211, name: 'Huawei HG8245H', brand: 'Huawei' }, { id: 212, name: 'ZTE F609', brand: 'ZTE' }] },
-            { id: 22, name: 'Access Point', classification: 'asset', trackingMethod: 'individual', unitOfMeasure: 'Unit', standardItems: [{ id: 221, name: 'Unifi AP AC Lite', brand: 'Ubiquiti' }] }
+            { id: 21, name: 'ONT/ONU', classification: 'asset', trackingMethod: 'individual', standardItems: [{ id: 211, name: 'Huawei HG8245H', brand: 'Huawei' }, { id: 212, name: 'ZTE F609', brand: 'ZTE' }] },
+            { id: 22, name: 'Access Point', classification: 'asset', trackingMethod: 'individual', standardItems: [{ id: 221, name: 'Unifi AP AC Lite', brand: 'Ubiquiti' }] }
         ]
     },
     {
         id: 3, name: 'Infrastruktur Fiber Optik', isCustomerInstallable: true, associatedDivisions: [3],
         types: [
-            { id: 31, name: 'Kabel Dropcore', classification: 'material', trackingMethod: 'bulk', unitOfMeasure: 'Meter', baseUnitOfMeasure: 'Meter', quantityPerUnit: 1, standardItems: [{ id: 311, name: 'Dropcore 1 Core', brand: 'FiberHome' }] },
-            { id: 32, name: 'Konektor / Adaptor', classification: 'material', trackingMethod: 'bulk', unitOfMeasure: 'Pcs', standardItems: [{ id: 321, name: 'Fast Connector SC/UPC', brand: 'Generic' }, { id: 322, name: 'Adaptor SC-UPC', brand: 'Generic' }] },
-            { id: 33, name: 'Patchcord', classification: 'material', trackingMethod: 'bulk', unitOfMeasure: 'Pcs', standardItems: [{ id: 331, name: 'Patchcord SC-UPC 3M', brand: 'Generic' }] },
-            { id: 34, name: 'Pelindung (Sleeve)', classification: 'material', trackingMethod: 'bulk', unitOfMeasure: 'Pcs', standardItems: [{ id: 341, name: 'Protection Sleeve 60mm', brand: 'Generic' }] }
+            { 
+                id: 31, 
+                name: 'Kabel Dropcore', 
+                classification: 'material', 
+                trackingMethod: 'bulk', 
+                // Definisi level Tipe (Default)
+                unitOfMeasure: 'Hasbal', 
+                standardItems: [{ 
+                    id: 311, 
+                    name: 'Dropcore 1 Core', 
+                    brand: 'FiberHome',
+                    bulkType: 'measurement',
+                    // Definisi level Model (Spesifik)
+                    unitOfMeasure: 'Hasbal',
+                    baseUnitOfMeasure: 'Meter',
+                    quantityPerUnit: 1000
+                }] 
+            },
+            { 
+                id: 32, 
+                name: 'Konektor / Adaptor', 
+                classification: 'material', 
+                trackingMethod: 'bulk', 
+                standardItems: [{ 
+                    id: 321, 
+                    name: 'Fast Connector SC/UPC', 
+                    brand: 'Generic',
+                    bulkType: 'count',
+                    unitOfMeasure: 'Pcs'
+                }, { 
+                    id: 322, 
+                    name: 'Adaptor SC-UPC', 
+                    brand: 'Generic',
+                    bulkType: 'count',
+                    unitOfMeasure: 'Pcs'
+                }] 
+            },
+            { id: 33, name: 'Patchcord', classification: 'material', trackingMethod: 'bulk', standardItems: [{ id: 331, name: 'Patchcord SC-UPC 3M', brand: 'Generic', bulkType: 'count', unitOfMeasure: 'Pcs' }] },
+            { id: 34, name: 'Pelindung (Sleeve)', classification: 'material', trackingMethod: 'bulk', standardItems: [{ id: 341, name: 'Protection Sleeve 60mm', brand: 'Generic', bulkType: 'count', unitOfMeasure: 'Pcs' }] }
         ]
     },
     {
         id: 4, name: 'Alat Kerja', isCustomerInstallable: false, associatedDivisions: [1, 2, 3],
         types: [
-            { id: 41, name: 'Splicer', classification: 'asset', trackingMethod: 'individual', unitOfMeasure: 'Unit', standardItems: [{ id: 411, name: 'Fusion Splicer 90S', brand: 'Fujikura' }] },
-            { id: 42, name: 'OTDR', classification: 'asset', trackingMethod: 'individual', unitOfMeasure: 'Unit', standardItems: [{ id: 421, name: 'OTDR MaxTester', brand: 'Exfo' }] }
+            { id: 41, name: 'Splicer', classification: 'asset', trackingMethod: 'individual', standardItems: [{ id: 411, name: 'Fusion Splicer 90S', brand: 'Fujikura' }] },
+            { id: 42, name: 'OTDR', classification: 'asset', trackingMethod: 'individual', standardItems: [{ id: 421, name: 'OTDR MaxTester', brand: 'Exfo' }] }
         ]
     }
 ];
@@ -115,8 +150,24 @@ export const mockAssets: Asset[] = [
     { id: 'AST-005', name: 'OTDR MaxTester', category: 'Alat Kerja', type: 'OTDR', brand: 'Exfo', serialNumber: 'SN-EX-88', status: AssetStatus.DAMAGED, condition: AssetCondition.MAJOR_DAMAGE, location: 'Meja Teknisi', registrationDate: d(-200), recordedBy: 'Admin Logistik', purchasePrice: 45000000, notes: 'Layar pecah terjatuh', attachments: [], activityLog: [{ id: 1, action: 'Kerusakan Dilaporkan', user: 'Staff Teknisi', timestamp: d(-1), details: 'Layar pecah saat operasional.' }] },
     { id: 'AST-006', name: 'Mikrotik CCR1009', category: 'Perangkat Jaringan (Core)', type: 'Router Core', brand: 'Mikrotik', serialNumber: 'SN-MK-002', status: AssetStatus.OUT_FOR_REPAIR, condition: AssetCondition.MINOR_DAMAGE, location: 'Service Center Jakarta', registrationDate: d(-150), recordedBy: 'Admin Logistik', purchasePrice: 7500000, attachments: [], activityLog: [{ id: 2, action: 'Proses Perbaikan Dimulai', user: 'Admin Logistik', timestamp: d(-5), details: 'Dikirim ke vendor service.' }] },
 
-    // E. MATERIAL (Bulk Item)
-    { id: 'MAT-001', name: 'Dropcore 1 Core', category: 'Infrastruktur Fiber Optik', type: 'Kabel Dropcore', brand: 'FiberHome', status: AssetStatus.IN_STORAGE, condition: AssetCondition.BRAND_NEW, location: 'Gudang Kabel', registrationDate: d(-30), recordedBy: 'Admin Logistik', purchasePrice: 1500, attachments: [], activityLog: [] },
+    // E. MATERIAL (Bulk Item) - Updated with balances
+    { 
+        id: 'MAT-001', 
+        name: 'Dropcore 1 Core', 
+        category: 'Infrastruktur Fiber Optik', 
+        type: 'Kabel Dropcore', 
+        brand: 'FiberHome', 
+        status: AssetStatus.IN_STORAGE, 
+        condition: AssetCondition.BRAND_NEW, 
+        location: 'Gudang Kabel', 
+        registrationDate: d(-30), 
+        recordedBy: 'Admin Logistik', 
+        purchasePrice: 1500, 
+        initialBalance: 1000, 
+        currentBalance: 850, 
+        attachments: [], 
+        activityLog: [] 
+    },
     { id: 'MAT-002', name: 'Adaptor SC-UPC', category: 'Infrastruktur Fiber Optik', type: 'Konektor / Adaptor', brand: 'Generic', status: AssetStatus.IN_STORAGE, condition: AssetCondition.BRAND_NEW, location: 'Gudang Acc', registrationDate: d(-10), recordedBy: 'Admin Logistik', purchasePrice: 5000, attachments: [], activityLog: [] },
 
     // F. ASSETS FROM SCENARIO RO-260101-0005 (Baru Saja Dicatat)
@@ -182,7 +233,7 @@ export const initialMockRequests: Request[] = [
     {
         id: 'RO-260101-0005',
         docNumber: 'RO-260101-0005',
-        requester: 'Leader Network',
+        requester: 'Leader Network', 
         division: 'Network Engineering',
         requestDate: '2026-01-01T23:07:23.000Z',
         status: ItemStatus.AWAITING_HANDOVER, // Status Kunci untuk tes

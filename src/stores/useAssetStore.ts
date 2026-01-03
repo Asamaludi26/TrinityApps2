@@ -1,3 +1,4 @@
+
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { Asset, AssetCategory, StockMovement, MovementType, ActivityLogEntry } from '../types';
@@ -12,7 +13,7 @@ interface AssetState {
 
   // Actions
   fetchAssets: () => Promise<void>;
-  addAsset: (asset: Asset) => Promise<void>;
+  addAsset: (asset: Asset | (Asset & { initialBalance?: number, currentBalance?: number })) => Promise<void>;
   updateAsset: (id: string, data: Partial<Asset>) => Promise<void>;
   updateAssetBatch: (ids: string[], data: Partial<Asset>) => Promise<void>;
   deleteAsset: (id: string) => Promise<void>;
@@ -66,7 +67,17 @@ export const useAssetStore = create<AssetState>()(
       },
 
       addAsset: async (rawAsset) => {
+        // FIX: Ensure bulk properties (balances) are preserved if passed from form
         const asset = sanitizeBulkAsset(rawAsset, get().categories) as Asset;
+        
+        // Manual assignment needed if sanitize strips them or if Typescript complains, 
+        // but here rawAsset is spread so it should be fine. 
+        // Just enforcing correctness:
+        if ((rawAsset as any).initialBalance !== undefined) {
+             asset.initialBalance = (rawAsset as any).initialBalance;
+             asset.currentBalance = (rawAsset as any).currentBalance;
+        }
+
         const current = get().assets;
         const updated = [asset, ...current];
         await api.updateData('app_assets', updated); 

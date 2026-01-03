@@ -1,3 +1,4 @@
+
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Asset, AssetStatus, Page, PreviewData, User, AssetCondition, StockMovement, ActivityLogEntry, Attachment } from '../../types';
 import { useSortableData } from '../../hooks/useSortableData';
@@ -25,6 +26,7 @@ import { Checkbox } from '../../components/ui/Checkbox';
 import { useAssetStore } from '../../stores/useAssetStore';
 import { useRequestStore } from '../../stores/useRequestStore';
 import { useNotificationStore } from '../../stores/useNotificationStore';
+import { useTransactionStore } from '../../stores/useTransactionStore'; // NEW IMPORT
 
 interface StockOverviewPageProps {
     currentUser: User;
@@ -39,27 +41,47 @@ export interface StockItem {
     name: string;
     category: string;
     brand: string;
-    inStorage: number;
+    // Counts (Jumlah Baris/Unit Fisik/Kontainer)
+    inStorage: number; 
     inUse: number;
     damaged: number;
     total: number;
+    
     valueInStorage: number;
     unitOfMeasure?: string;
     trackingMethod?: 'individual' | 'bulk';
+    
+    // Measurement Logic Fields
+    isMeasurement?: boolean;
+    baseUnit?: string; // e.g., "Meter"
+    
+    // Balances (Saldo Isi untuk Measurement)
+    storageBalance: number; // Sisa meteran di gudang (Available Balance)
+    inUseBalance: number;   // Total meteran terpasang (Calculated from Transactions)
+    damagedBalance: number; // Total meteran rusak
+    grandTotalBalance: number; // Total kapasitas awal yang dibeli (Initial Balance Sum)
+    
+    // Usage History
+    usageDetails?: { docNumber: string; qty: number; type: 'install' | 'maintenance' }[];
 }
 
-const LOW_STOCK_DEFAULT = 5;
+// --- SMART THRESHOLD LOGIC ---
+const DEFAULT_UNIT_THRESHOLD = 5;       // Untuk Device/Pcs (5 Unit)
+const DEFAULT_MEASUREMENT_THRESHOLD = 2; // Untuk Kabel/Measurement (2 Hasbal/Drum)
 
 const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setActivePage, onShowPreview, initialFilters, onClearInitialFilters }) => {
     // Stores
     const { assets, categories: assetCategories, getStockHistory, updateAsset, thresholds, updateThresholds } = useAssetStore();
     const loanRequests = useRequestStore((state) => state.loanRequests);
+    const installations = useTransactionStore((state) => state.installations);
+    const maintenances = useTransactionStore((state) => state.maintenances);
+    
     const addNotification = useNotificationStore(state => state.addToast);
     
     // State
     const [searchQuery, setSearchQuery] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
-    const [itemsPerPage, setItemsPerPage] = useState(9);
+    const [itemsPerPage, setItemsPerPage] = useState(10);
     const [editingThresholdKey, setEditingThresholdKey] = useState<string | null>(null);
     const [tempThreshold, setTempThreshold] = useState<string>('');
 
@@ -207,38 +229,153 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
     const aggregatedStock = useMemo<StockItem[]>(() => {
         if (currentUser.role === 'Staff') return [];
         const stockMap = new Map<string, StockItem>();
+        // We include all assets to calculate total owned, but specific statuses filter for inStorage etc.
         const activeAssets = assets.filter(asset => asset.status !== AssetStatus.DECOMMISSIONED);
+        
+        // 1. Initialize Map
         activeAssets.forEach(asset => {
              const key = `${asset.name}|${asset.brand}`;
             if (!stockMap.has(key)) {
+                // Lookup Model/Type details for Measurement Logic
                 const category = assetCategories.find(c => c.name === asset.category);
                 const type = category?.types.find(t => t.name === asset.type);
-                stockMap.set(key, { name: asset.name, category: asset.category, brand: asset.brand, inStorage: 0, inUse: 0, damaged: 0, total: 0, valueInStorage: 0, unitOfMeasure: type?.unitOfMeasure || 'unit', trackingMethod: type?.trackingMethod || 'individual'});
+                const model = type?.standardItems?.find(m => m.name === asset.name && m.brand === asset.brand);
+                
+                const isMeasurement = model?.bulkType === 'measurement';
+
+                stockMap.set(key, { 
+                    name: asset.name, 
+                    category: asset.category, 
+                    brand: asset.brand, 
+                    inStorage: 0, 
+                    inUse: 0, 
+                    damaged: 0, 
+                    total: 0, 
+                    valueInStorage: 0, 
+                    // UPDATED LOGIC: Prioritize Model > Type > Default
+                    unitOfMeasure: model?.unitOfMeasure || type?.unitOfMeasure || 'Unit', 
+                    trackingMethod: type?.trackingMethod || 'individual',
+                    
+                    isMeasurement,
+                    // UPDATED LOGIC: Prioritize Model > Type > Default
+                    baseUnit: isMeasurement ? (model?.baseUnitOfMeasure || type?.baseUnitOfMeasure || 'Meter') : undefined,
+                    storageBalance: 0,
+                    inUseBalance: 0,
+                    damagedBalance: 0,
+                    grandTotalBalance: 0,
+                    usageDetails: []
+                });
             }
         });
+        
+         // 2. Aggregate Asset Data
          activeAssets.forEach(asset => {
             const key = `${asset.name}|${asset.brand}`;
             const current = stockMap.get(key);
+            
             if (current) {
+                // COUNT AGGREGATION (Row Level) - Ini adalah "Jumlah Fisik" atau "Jumlah Kontainer"
                 current.total++;
+                
+                // MEASUREMENT AGGREGATION (Content Level)
+                // Use fallback to initialBalance if currentBalance is not yet set (new items)
+                const currentContent = typeof asset.currentBalance === 'number' ? asset.currentBalance : (asset.initialBalance || 0);
+                const initialContent = asset.initialBalance || 0;
+
+                if (current.isMeasurement) {
+                    // Grand Total is sum of what we BOUGHT (Initial Capacity)
+                    current.grandTotalBalance += initialContent;
+                }
+
+                // Aggregation Logic by Status
                 switch (asset.status) {
-                    case AssetStatus.IN_STORAGE: current.inStorage++; if (asset.purchasePrice) current.valueInStorage += asset.purchasePrice; break;
-                    case AssetStatus.IN_USE: current.inUse++; break;
-                    case AssetStatus.DAMAGED: case AssetStatus.UNDER_REPAIR: case AssetStatus.OUT_FOR_REPAIR: current.damaged++; break;
+                    case AssetStatus.IN_STORAGE: 
+                        current.inStorage++; // +1 Hasbal/Drum
+                        if (asset.purchasePrice) current.valueInStorage += asset.purchasePrice; 
+                        
+                        if (current.isMeasurement) {
+                            current.storageBalance += currentContent; // +850 Meter
+                        }
+                        break;
+                        
+                    case AssetStatus.IN_USE: 
+                        current.inUse++; 
+                        // Logic for Measurement IN_USE is handled via Transaction History below
+                        break;
+                        
+                    case AssetStatus.DAMAGED: 
+                    case AssetStatus.UNDER_REPAIR: 
+                    case AssetStatus.OUT_FOR_REPAIR: 
+                        current.damaged++; 
+                        if (current.isMeasurement) {
+                            current.damagedBalance += currentContent;
+                        }
+                        break;
                 }
             }
         });
-        return Array.from(stockMap.values()).filter(item => item.total > 0);
-    }, [assets, assetCategories, currentUser]);
+
+        // 3. Aggregate Usage History (Installations & Maintenance) for Measurement/Bulk items
+        // This gives accurate "Digunakan" numbers for cables/connectors
+        const usageMap = new Map<string, { totalQty: number, docs: {docNumber: string, qty: number, type: 'install' | 'maintenance'}[] }>();
+
+        const processUsage = (itemName: string, brand: string, quantity: number, docNumber: string, type: 'install' | 'maintenance') => {
+             const key = `${itemName}|${brand}`;
+             if (!usageMap.has(key)) usageMap.set(key, { totalQty: 0, docs: [] });
+             const entry = usageMap.get(key)!;
+             entry.totalQty += quantity;
+             // Keep last 5 docs
+             if (entry.docs.length < 5) {
+                 entry.docs.push({ docNumber: docNumber, qty: quantity, type });
+             }
+        };
+
+        installations.forEach(inst => {
+            inst.materialsUsed?.forEach(mat => {
+                processUsage(mat.itemName, mat.brand, mat.quantity, inst.docNumber, 'install');
+            });
+        });
+
+        maintenances.forEach(mnt => {
+            mnt.materialsUsed?.forEach(mat => {
+                processUsage(mat.itemName, mat.brand, mat.quantity, mnt.docNumber, 'maintenance');
+            });
+        });
+
+        // 4. Merge Usage Data into Stock Items
+        stockMap.forEach((item, key) => {
+             const usage = usageMap.get(key);
+             if (usage) {
+                 if (item.isMeasurement || item.trackingMethod === 'bulk') {
+                     // For measurement, use transaction history for In Use balance
+                     item.inUseBalance = usage.totalQty;
+                     item.usageDetails = usage.docs;
+                 }
+             }
+        });
+
+        return Array.from(stockMap.values()).filter(item => item.total > 0 || item.inUseBalance > 0);
+    }, [assets, assetCategories, currentUser, installations, maintenances]);
     
      const summaryData = useMemo(() => {
         if (currentUser.role === 'Staff') return null;
+        
+        // Smart count for low stock
+        // UPDATED: Now compares PHYSICAL COUNT (Containers/Units) against threshold for ALL items.
+        // Even for cables, we care if we have < 2 drums left, not if we have < 2 meters.
         const lowStockItems = aggregatedStock.filter(item => {
             const key = `${item.name}|${item.brand}`;
-            const threshold = thresholds[key] ?? LOW_STOCK_DEFAULT;
-            return item.inStorage > 0 && item.inStorage <= threshold;
+            const threshold = thresholds[key] ?? (item.isMeasurement ? DEFAULT_MEASUREMENT_THRESHOLD : DEFAULT_UNIT_THRESHOLD);
+            
+            const stockCount = item.inStorage; // Physical count / Containers
+            return stockCount > 0 && stockCount <= threshold;
         }).length;
-        const outOfStockItems = aggregatedStock.filter(item => item.inStorage === 0).length;
+        
+        const outOfStockItems = aggregatedStock.filter(item => {
+             const stockCount = item.inStorage;
+             return stockCount === 0;
+        }).length;
+
         const totalValueInStorage = aggregatedStock.reduce((sum, item) => sum + item.valueInStorage, 0);
         return { totalTypes: aggregatedStock.length, lowStockItems, outOfStockItems, totalValueInStorage };
     }, [aggregatedStock, thresholds, currentUser.role]);
@@ -268,9 +405,13 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
             .filter(item => {
                 if (!filters.lowStockOnly && !filters.outOfStockOnly) return true;
                 const key = `${item.name}|${item.brand}`;
-                const threshold = thresholds[key] ?? LOW_STOCK_DEFAULT;
-                if (filters.lowStockOnly) return item.inStorage > 0 && item.inStorage <= threshold;
-                if (filters.outOfStockOnly) return item.inStorage === 0;
+                
+                // Smart Threshold Logic for Filtering as well
+                const threshold = thresholds[key] ?? (item.isMeasurement ? DEFAULT_MEASUREMENT_THRESHOLD : DEFAULT_UNIT_THRESHOLD);
+                const stockCount = item.inStorage; // Physical Count
+                
+                if (filters.lowStockOnly) return stockCount > 0 && stockCount <= threshold;
+                if (filters.outOfStockOnly) return stockCount === 0;
                 return true;
             });
     }, [aggregatedStock, searchQuery, filters, thresholds, currentUser.role]);
@@ -281,6 +422,7 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
     const startIndex = (currentPage - 1) * itemsPerPage;
     const paginatedStock = sortedStock.slice(startIndex, startIndex + itemsPerPage);
 
+    // ... (Rest of code remains same for Damage Report logic) ...
     // --- DAMAGE REPORT LOGIC ---
     const handleReportDamageClick = (asset: Asset) => {
         setAssetToReport(asset);
@@ -326,6 +468,7 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
 
     // --- RENDER STAFF VIEW ---
     if (currentUser.role === 'Staff') {
+        // ... (Existing Staff Render Logic)
         return (
             <div className="p-4 sm:p-6 md:p-8 space-y-8">
                 <h1 className="text-3xl font-bold text-tm-dark">Aset Saya</h1>
@@ -339,6 +482,7 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
                 )}
                 
                 <div className="p-4 bg-white border border-gray-200/80 rounded-xl shadow-md">
+                     {/* ... Filter Components ... */}
                     <div className="flex flex-wrap items-center gap-4">
                         <div className="relative flex-grow">
                             <SearchIcon className="absolute w-5 h-5 text-gray-400 transform -translate-y-1/2 top-1/2 left-3" />

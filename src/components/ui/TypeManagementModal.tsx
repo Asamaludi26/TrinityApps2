@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { AssetCategory, AssetType, Asset, TrackingMethod, StandardItem, ItemClassification } from '../../types';
+import { AssetCategory, AssetType, Asset, TrackingMethod, ItemClassification } from '../../types';
 import Modal from './Modal';
 import { PencilIcon } from '../icons/PencilIcon';
 import { TrashIcon } from '../icons/TrashIcon';
@@ -8,9 +8,7 @@ import { SpinnerIcon } from '../icons/SpinnerIcon';
 import { ExclamationTriangleIcon } from '../icons/ExclamationTriangleIcon';
 import { InboxIcon } from '../icons/InboxIcon';
 import { useNotification } from '../../providers/NotificationProvider';
-import { CustomSelect } from './CustomSelect';
-import { CreatableSelect } from './CreatableSelect';
-import { BsBoxes, BsUpcScan, BsTools, BsLightningFill } from 'react-icons/bs';
+import { BsTools, BsLightningFill } from 'react-icons/bs';
 
 // Store
 import { useAssetStore } from '../../stores/useAssetStore';
@@ -30,8 +28,6 @@ interface TypeManagementModalProps {
 interface TypeToDelete extends AssetType {
     assetCount: number;
 }
-
-const commonUnits = ['unit', 'pcs', 'set', 'pack', 'box', 'meter', 'roll', 'liter', 'kg', 'lembar', 'pasang', 'buah'];
 
 export const TypeManagementModal: React.FC<TypeManagementModalProps> = ({
   isOpen,
@@ -56,12 +52,9 @@ export const TypeManagementModal: React.FC<TypeManagementModalProps> = ({
   const types = category.types || [];
 
   const [name, setName] = useState('');
-  // Inisialisasi klasifikasi berdasarkan prop default
   const [classification, setClassification] = useState<ItemClassification>(defaultClassification);
   const [trackingMethod, setTrackingMethod] = useState<TrackingMethod>('individual');
-  const [unitOfMeasure, setUnitOfMeasure] = useState('unit');
-  const [baseUnitOfMeasure, setBaseUnitOfMeasure] = useState('pcs');
-  const [quantityPerUnit, setQuantityPerUnit] = useState<number | ''>('');
+  
   const [editingId, setEditingId] = useState<number | null>(null);
   const [typeToDelete, setTypeToDelete] = useState<TypeToDelete | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -78,9 +71,6 @@ export const TypeManagementModal: React.FC<TypeManagementModalProps> = ({
             setName(typeToEdit.name);
             setClassification(typeToEdit.classification || 'asset');
             setTrackingMethod(typeToEdit.trackingMethod || 'individual');
-            setUnitOfMeasure(typeToEdit.unitOfMeasure || 'unit');
-            setBaseUnitOfMeasure(typeToEdit.baseUnitOfMeasure || 'pcs');
-            setQuantityPerUnit(typeToEdit.quantityPerUnit || '');
         } else {
             // Mode Baru: Reset form dan terapkan logika otomatis
             resetForm();
@@ -93,7 +83,7 @@ export const TypeManagementModal: React.FC<TypeManagementModalProps> = ({
   // Logika Otomatisasi: Paksa tracking method berdasarkan klasifikasi
   useEffect(() => {
       // Hanya terapkan logika paksa jika BUKAN mode edit (saat membuat baru)
-      // Atau jika user secara eksplisit mengubah klasifikasi (walaupun UI disembunyikan, logic tetap ada)
+      // Atau jika user secara eksplisit mengubah klasifikasi
       if (!isEditing) {
           if (classification === 'material') {
               setTrackingMethod('bulk'); 
@@ -108,16 +98,8 @@ export const TypeManagementModal: React.FC<TypeManagementModalProps> = ({
     // Set klasifikasi sesuai tab yang aktif di parent
     setClassification(defaultClassification); 
     
-    // Logika Otomatis:
-    // Jika Tab Asset -> Individual
-    // Jika Tab Material -> Bulk
     const isMaterialTab = defaultClassification === 'material';
     setTrackingMethod(isMaterialTab ? 'bulk' : 'individual');
-    
-    // Default satuan
-    setUnitOfMeasure(isMaterialTab ? 'Pcs' : 'unit');
-    setBaseUnitOfMeasure('pcs');
-    setQuantityPerUnit('');
     
     setEditingId(null);
     setIsLoading(false);
@@ -128,9 +110,6 @@ export const TypeManagementModal: React.FC<TypeManagementModalProps> = ({
     setName(type.name);
     setClassification(type.classification || 'asset');
     setTrackingMethod(type.trackingMethod || 'individual');
-    setUnitOfMeasure(type.unitOfMeasure || 'unit');
-    setBaseUnitOfMeasure(type.baseUnitOfMeasure || 'pcs');
-    setQuantityPerUnit(type.quantityPerUnit || '');
   };
 
   const handleDeleteClick = (type: AssetType) => {
@@ -162,16 +141,14 @@ export const TypeManagementModal: React.FC<TypeManagementModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !unitOfMeasure.trim()) {
-      addNotification('Nama tipe dan satuan ukur harus diisi.', 'error');
+    if (!name.trim()) {
+      addNotification('Nama tipe harus diisi.', 'error');
       return;
     }
     
     // Validate Material Requirement
     if (classification === 'material' && !category.isCustomerInstallable) {
         addNotification('Peringatan: Material seharusnya berada dalam Kategori yang dapat dipasang ke pelanggan ("Installable"). Pastikan kategori ini sudah diatur dengan benar.', 'warning');
-        // We allow it to proceed with a warning, or you could block it:
-        // return; 
     }
 
     setIsLoading(true);
@@ -180,9 +157,6 @@ export const TypeManagementModal: React.FC<TypeManagementModalProps> = ({
         name,
         classification,
         trackingMethod, 
-        unitOfMeasure,
-        baseUnitOfMeasure: trackingMethod === 'bulk' ? baseUnitOfMeasure : undefined,
-        quantityPerUnit: (trackingMethod === 'bulk' && quantityPerUnit !== '') ? Number(quantityPerUnit) : undefined
     };
 
     if (propOnSave) {
@@ -217,7 +191,7 @@ export const TypeManagementModal: React.FC<TypeManagementModalProps> = ({
         isOpen={isOpen}
         onClose={onClose}
         title={`Kelola Tipe & Material`}
-        size="lg"
+        size="2xl" 
         hideDefaultCloseButton
         disableContentPadding
       >
@@ -236,7 +210,7 @@ export const TypeManagementModal: React.FC<TypeManagementModalProps> = ({
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {/* Auto-Configuration Display (Replacing Manual Selection) */}
+                        {/* Auto-Configuration Display */}
                         <div className="sm:col-span-2">
                              <label className="block text-sm font-medium text-gray-700 mb-2">Konfigurasi Item (Otomatis)</label>
                              {classification === 'asset' ? (
@@ -250,73 +224,18 @@ export const TypeManagementModal: React.FC<TypeManagementModalProps> = ({
                                     </div>
                                 </div>
                              ) : (
-                                <div className="p-3 bg-orange-50 border border-orange-100 rounded-lg flex items-center gap-3 animate-fade-in-up">
-                                    <div className="p-2 bg-orange-100 text-orange-600 rounded-full flex-shrink-0"><BsLightningFill /></div>
-                                    <div>
-                                        <div className="font-semibold text-sm text-gray-900">Material (Consumables)</div>
-                                        <div className="text-xs text-gray-500">
-                                            Metode Pelacakan: <span className="font-bold text-orange-600">Massal (Bulk)</span>
+                                <div className="p-3 bg-orange-50 border border-orange-100 rounded-lg flex flex-col gap-3 animate-fade-in-up">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 bg-orange-100 text-orange-600 rounded-full flex-shrink-0"><BsLightningFill /></div>
+                                        <div>
+                                            <div className="font-semibold text-sm text-gray-900">Material (Consumables)</div>
+                                            <div className="text-xs text-gray-500">
+                                                Metode Pelacakan: <span className="font-bold text-orange-600">Massal (Bulk)</span>. Konfigurasi detail stok diatur pada level Model.
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                              )}
-                        </div>
-
-                        {/* Unit Config */}
-                        <div className="space-y-4 sm:col-span-2 border-t pt-4">
-                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                 <div>
-                                    <label htmlFor="unitOfMeasure" className="block text-sm font-medium text-gray-700">
-                                        Satuan Stok Utama
-                                    </label>
-                                    <div className="mt-1">
-                                        <CreatableSelect
-                                            options={commonUnits}
-                                            value={unitOfMeasure}
-                                            onChange={setUnitOfMeasure}
-                                            placeholder="Cth: Pcs, Meter, Roll"
-                                        />
-                                    </div>
-                                    <p className="mt-1 text-xs text-gray-500">
-                                        {classification === 'material' 
-                                            ? "Satuan saat barang dikeluarkan dari gudang. (Cth: 'Meter' untuk kabel hasbal)." 
-                                            : "Satuan penghitungan stok."}
-                                    </p>
-                                </div>
-
-                                {trackingMethod === 'bulk' && (
-                                    <>
-                                        <div className="animate-fade-in-up">
-                                            <label htmlFor="baseUnitOfMeasure" className="block text-sm font-medium text-gray-700">Satuan Eceran (Opsional)</label>
-                                            <div className="mt-1">
-                                                <CreatableSelect
-                                                    options={commonUnits}
-                                                    value={baseUnitOfMeasure}
-                                                    onChange={setBaseUnitOfMeasure}
-                                                    placeholder="Cth: Meter, Pcs"
-                                                />
-                                            </div>
-                                            <p className="mt-1 text-xs text-gray-500">Jika stok utama adalah paket (misal: Roll/Box), ini satuan isinya.</p>
-                                        </div>
-                                        <div className="sm:col-span-2 animate-fade-in-up">
-                                            <label htmlFor="quantityPerUnit" className="block text-sm font-medium text-gray-700">Konversi (Isi per Satuan Utama)</label>
-                                            <div className="flex items-center gap-2 mt-1">
-                                                <span className="text-sm text-gray-600">1 {unitOfMeasure || '...'} = </span>
-                                                <input 
-                                                    type="number" 
-                                                    id="quantityPerUnit" 
-                                                    value={quantityPerUnit} 
-                                                    onChange={(e) => setQuantityPerUnit(e.target.value === '' ? '' : Number(e.target.value))} 
-                                                    placeholder="1" 
-                                                    className="block w-24 px-3 py-2 text-gray-900 bg-gray-50 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-tm-accent focus:border-tm-accent sm:text-sm" 
-                                                />
-                                                <span className="text-sm text-gray-600">{baseUnitOfMeasure || '...'}</span>
-                                            </div>
-                                             <p className="mt-1 text-xs text-gray-500">Biarkan 1 jika tidak ada konversi (misal: stok langsung dalam Meter).</p>
-                                        </div>
-                                    </>
-                                )}
-                             </div>
                         </div>
                     </div>
                     
@@ -333,7 +252,7 @@ export const TypeManagementModal: React.FC<TypeManagementModalProps> = ({
           {/* List Section */}
           <div>
             <h3 className="text-base font-semibold text-gray-800 mb-2">Daftar Tipe ({types.length})</h3>
-            <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-2 -mr-2">
+            <div className="space-y-2 max-h-80 overflow-y-auto custom-scrollbar pr-2 -mr-2">
               {types.length > 0 ? (
                 types.map(type => {
                     const modelCount = type.standardItems?.length || 0;
@@ -352,7 +271,7 @@ export const TypeManagementModal: React.FC<TypeManagementModalProps> = ({
                                     )}
                                 </div>
                                 <p className="text-xs text-gray-500 mt-0.5">
-                                    {modelCount} Model &bull; {assetCount} Item &bull; <span className="font-medium">{type.trackingMethod === 'bulk' ? `Bulk (${type.unitOfMeasure})` : 'Individual'}</span>
+                                    {modelCount} Model &bull; {assetCount} Item
                                 </p>
                             </div>
                             <div className="flex items-center space-x-1">
@@ -373,6 +292,7 @@ export const TypeManagementModal: React.FC<TypeManagementModalProps> = ({
         </div>
       </Modal>
 
+      {/* Confirmation Modals remain unchanged */}
       {typeToDelete && (
         <Modal
           isOpen={!!typeToDelete}

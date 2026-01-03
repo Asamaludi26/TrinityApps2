@@ -43,49 +43,95 @@ const CustomerFormPage: React.FC<CustomerFormPageProps> = (props) => {
     const isEditing = !!customerToEdit;
     const addNotification = useNotification();
 
-    // Helper function untuk memproses konsumsi material
+    // Helper function untuk memproses konsumsi material (UPDATED LOGIC V2 - Measurement Support)
     const processMaterialConsumption = async (materials: InstalledMaterial[], customerId: string, customerAddress: string) => {
         for (const mat of materials) {
-            // 1. Cari kategori/tipe untuk material ini untuk cek tracking method
-            // (Disederhanakan: Kita asumsikan material di form sudah terfilter sebagai bulk/material)
+            // 1. Identifikasi Tipe Material dari Model (StandardItem)
+            let isMeasurement = false;
             
-            // 2. Cari stok tersedia (FIFO - First In First Out logic sederhana)
+            // Cari definisi Model di kategori
+            for (const cat of assetCategories) {
+                for (const type of cat.types) {
+                    const model = type.standardItems?.find(i => i.name === mat.itemName && i.brand === mat.brand);
+                    if (model) {
+                        isMeasurement = model.bulkType === 'measurement';
+                        break;
+                    }
+                }
+                if (isMeasurement) break;
+            }
+
+            // 2. Cari stok tersedia (FIFO - First In First Out)
             const availableStock = assets
                 .filter(a => 
                     a.name === mat.itemName && 
                     a.brand === mat.brand && 
                     a.status === AssetStatus.IN_STORAGE
                 )
-                .sort((a, b) => new Date(a.registrationDate).getTime() - new Date(b.registrationDate).getTime()); // Ambil stok terlama dulu
+                .sort((a, b) => new Date(a.registrationDate).getTime() - new Date(b.registrationDate).getTime());
 
-            // 3. Tentukan jumlah yang harus "dikonsumsi" dari stok
-            // Catatan: Untuk item kontinu (misal kabel roll), logika ini mengasumsikan 1 unit stok = 1 unit pemakaian
-            // Di sistem produksi nyata, perlu field 'quantity' pada tabel Asset untuk pengurangan parsial.
-            // Di sini kita ambil N item stok dan ubah statusnya.
-            const quantityToConsume = Math.min(mat.quantity, availableStock.length);
-
-            if (quantityToConsume > 0) {
-                const itemsToUpdate = availableStock.slice(0, quantityToConsume);
-                for (const item of itemsToUpdate) {
-                    await updateAsset(item.id, {
-                        status: AssetStatus.IN_USE, // Material terpasang
-                        currentUser: customerId,
-                        location: `Terpasang di: ${customerAddress}`,
-                        activityLog: [] // Store akan handle append log
-                    });
-                }
+            if (isMeasurement) {
+                // --- LOGIKA PENGUKURAN (MEASUREMENT) ---
+                let remainingNeed = mat.quantity; // Jumlah yang dibutuhkan
                 
-                // Jika stok kurang dari permintaan (misal kabel meteran yang tidak 1:1 dengan stok asset ID),
-                // kita biarkan tercatat di Customer tapi stok fisik di sistem habis.
-                if (mat.quantity > availableStock.length) {
-                    console.warn(`Stok sistem tidak mencukupi untuk ${mat.itemName}. Diminta: ${mat.quantity}, Tersedia: ${availableStock.length}`);
+                for (const asset of availableStock) {
+                    if (remainingNeed <= 0) break;
+
+                    // Gunakan currentBalance. Jika undefined, gunakan initialBalance atau 0
+                    const currentBalance = asset.currentBalance ?? asset.initialBalance ?? 0;
+                    
+                    if (currentBalance <= 0) continue; 
+
+                    if (currentBalance > remainingNeed) {
+                        // KASUS A: Stok di aset ini CUKUP (Partial Use)
+                        // PENTING: Status TETAP 'IN_STORAGE' agar tidak hilang dari tabel stok
+                        const newBalance = currentBalance - remainingNeed;
+                        
+                        await updateAsset(asset.id, {
+                            currentBalance: newBalance,
+                            status: AssetStatus.IN_STORAGE, // Force keep in storage
+                            activityLog: [] 
+                        });
+                        
+                        remainingNeed = 0; 
+                    } else {
+                        // KASUS B: Stok di aset ini HABIS (Full Use of this specific asset ID)
+                        const consumed = currentBalance;
+                        remainingNeed -= consumed;
+                        
+                        await updateAsset(asset.id, {
+                            currentBalance: 0,
+                            status: AssetStatus.CONSUMED, // Tandai HABIS (Keluar dari stok aktif)
+                            activityLog: []
+                        });
+                    }
+                }
+
+                if (remainingNeed > 0) {
+                    addNotification(`Peringatan: Stok fisik ${mat.itemName} kurang ${remainingNeed} ${mat.unit}.`, 'warning');
+                }
+
+            } else {
+                // --- LOGIKA PERHITUNGAN BIASA (COUNT) ---
+                // Pindah status fisik ke IN_USE (Pelanggan)
+                const quantityToConsume = Math.min(mat.quantity, availableStock.length);
+
+                if (quantityToConsume > 0) {
+                    const itemsToUpdate = availableStock.slice(0, quantityToConsume);
+                    for (const item of itemsToUpdate) {
+                        await updateAsset(item.id, {
+                            status: AssetStatus.IN_USE, 
+                            currentUser: customerId,
+                            location: `Terpasang di: ${customerAddress}`,
+                            activityLog: [] 
+                        });
+                    }
                 }
             }
         }
     };
 
     const handleSaveCustomer = async (
-        // REFACTOR: 'id' sekarang disertakan dalam formData (sudah tidak di-omit)
         formData: Omit<Customer, 'activityLog'>,
         newlyAssignedAssetIds: string[],
         unassignedAssetIds: string[]
@@ -109,7 +155,7 @@ const CustomerFormPage: React.FC<CustomerFormPageProps> = (props) => {
             });
         }
 
-        const targetCustomerId = formData.id; // Gunakan ID dari form
+        const targetCustomerId = formData.id; 
 
         for (const assetId of newlyAssignedAssetIds) {
             await updateAsset(assetId, {
@@ -120,15 +166,8 @@ const CustomerFormPage: React.FC<CustomerFormPageProps> = (props) => {
         }
 
         // --- 2. Update Assets Side Effects (Material Habis Pakai) ---
-        // Logika Baru: Mengurangi stok berdasarkan material yang diinput
         if (formData.installedMaterials && formData.installedMaterials.length > 0) {
-            // Hitung delta material (hanya yang baru ditambah jika edit, atau semua jika baru)
-            // Untuk penyederhanaan di prototype ini, kita proses semua material yang ada di list form
-            // Idealnya kita bandingkan dengan state sebelumnya.
-            // Namun, karena Material di form ini biasanya "Snapshot" kondisi saat ini, 
-            // kita asumsikan user menambahkan material baru lewat form ini.
-            
-            // Filter material yang tanggal instalasinya "hari ini" (baru ditambahkan di sesi ini)
+            // Proses material (Deteksi perubahan idealnya lebih canggih, disini simplifikasi by date)
             const today = new Date().toISOString().split('T')[0];
             const newMaterials = formData.installedMaterials.filter(m => m.installationDate.startsWith(today));
             

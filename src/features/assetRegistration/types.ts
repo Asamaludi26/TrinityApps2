@@ -30,8 +30,15 @@ export interface RegistrationFormData {
     notes: string | null;
     attachments: Attachment[];
     
-    // UUID string lebih aman daripada number untuk ID sementara
-    bulkItems: { id: string | number, serialNumber: string, macAddress: string }[];
+    // Updated: Support for measurement balances
+    bulkItems: { 
+        id: string | number, 
+        serialNumber: string, 
+        macAddress: string,
+        initialBalance?: number,
+        currentBalance?: number
+    }[];
+    
     quantity: number | '';
     relatedRequestId: string | null;
 }

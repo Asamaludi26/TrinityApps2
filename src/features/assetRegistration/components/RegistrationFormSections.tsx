@@ -4,13 +4,14 @@ import { InfoIcon } from '../../../components/icons/InfoIcon';
 import { DollarIcon } from '../../../components/icons/DollarIcon';
 import { WrenchIcon } from '../../../components/icons/WrenchIcon';
 import { CustomSelect } from '../../../components/ui/CustomSelect';
-import { AssetCondition, AssetType, AssetCategory } from '../../../types';
+import { AssetCondition, AssetType, AssetCategory, StandardItem } from '../../../types';
 import { RegistrationFormData } from '../types';
 import DatePicker from '../../../components/ui/DatePicker';
 import { QrCodeIcon } from '../../../components/icons/QrCodeIcon';
 import { TrashIcon } from '../../../components/icons/TrashIcon';
 import { ExclamationTriangleIcon } from '../../../components/icons/ExclamationTriangleIcon';
 import { PaperclipIcon } from '../../../components/icons/PaperclipIcon';
+import { BsRulers } from 'react-icons/bs';
 
 interface SectionProps {
     formData: RegistrationFormData;
@@ -37,9 +38,9 @@ interface IdentitySectionProps extends SectionProps {
     handleModelChange: (val: string) => void;
     setActivePage: (page: any) => void;
     
-    selectedCategoryId?: AssetCategory; // Keeping prop name flexible although component expects Object usually or rename to selectedCategory to match usage
+    selectedCategoryId?: AssetCategory;
     selectedCategory?: AssetCategory;
-    assetTypeId?: AssetType; // Keeping prop name flexible
+    assetTypeId?: AssetType; 
     selectedType?: AssetType;
     openTypeModal: (c: AssetCategory, t: null) => void;
     openModelModal: (c: AssetCategory, t: AssetType) => void;
@@ -194,16 +195,21 @@ interface TrackingSectionProps extends SectionProps {
     removeBulkItem: (id: string | number) => void;
     updateBulkItem: (id: string | number, field: 'serialNumber' | 'macAddress', value: string) => void;
     onStartScan: (id: string | number) => void;
+    // New Prop to check model details
+    selectedModel?: StandardItem;
 }
 
 export const TrackingSection: React.FC<TrackingSectionProps> = ({ 
-    formData, updateField, selectedType, isEditing, addBulkItem, removeBulkItem, updateBulkItem, onStartScan 
+    formData, updateField, selectedType, selectedModel, isEditing, addBulkItem, removeBulkItem, updateBulkItem, onStartScan 
 }) => {
-    const unitLabel = selectedType?.unitOfMeasure || 'Unit';
-    const totalCalculatedBaseQuantity = (typeof formData.quantity === 'number' && selectedType?.quantityPerUnit) ? formData.quantity * selectedType.quantityPerUnit : '';
-
-    // Logic: Bulk tracking jika diatur di tipe, KECUALI sedang edit aset individual (fallback)
+    // Determine labels and modes based on Model if available, else Type
     const isBulkMode = selectedType?.trackingMethod === 'bulk' && !isEditing;
+    const modelUnit = selectedModel?.unitOfMeasure || selectedType?.unitOfMeasure || 'Unit';
+    const unitLabel = modelUnit;
+    
+    // Check if bulk type is measurement (e.g. Cable)
+    // Priority: Model config > Type config (fallback)
+    const isMeasurementType = isBulkMode && (selectedModel?.bulkType === 'measurement');
 
     return (
         <FormSection title="Detail Unit Aset" icon={<InfoIcon className="w-6 h-6 mr-3 text-tm-primary" />} className="md:col-span-2">
@@ -242,14 +248,51 @@ export const TrackingSection: React.FC<TrackingSectionProps> = ({
                 </div>
             ) : (
                 <>
-                    <div className="md:col-span-2 p-4 -mt-2 mb-2 border-l-4 rounded-r-lg bg-info-light border-tm-primary">
-                        <div className="flex items-start gap-3"><InfoIcon className="flex-shrink-0 w-5 h-5 mt-1 text-info-text" /><div className="text-sm text-info-text"><p className="font-semibold">Mode Pencatatan Massal (Bulk)</p><p>Sistem akan membuat {formData.quantity || 0} entri aset terpisah tanpa nomor seri individual.</p></div></div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:col-span-2">
-                        <div><label className="block text-sm font-medium text-gray-700">Stok ({unitLabel})</label><div className="relative mt-1"><input type="number" value={formData.quantity} onChange={(e) => updateField('quantity', e.target.value === '' ? '' : parseInt(e.target.value, 10))} min="1" required className="block w-full py-2 text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm sm:text-sm" /></div></div>
-                        <div><label className="block text-sm font-medium text-gray-700">Ukuran Satuan ({selectedType?.baseUnitOfMeasure || '...'})</label><div className="relative mt-1"><input type="number" value={selectedType?.quantityPerUnit || ''} readOnly className="block w-full py-2 text-gray-700 bg-gray-100 border border-gray-200 rounded-md shadow-sm sm:text-sm" /></div></div>
-                        <div><label className="block text-sm font-medium text-gray-700">Total Ukuran ({selectedType?.baseUnitOfMeasure || '...'})</label><div className="relative mt-1"><input type="number" value={totalCalculatedBaseQuantity} readOnly className="block w-full py-2 text-gray-700 bg-gray-100 border border-gray-200 rounded-md shadow-sm sm:text-sm" /></div></div>
-                    </div>
+                    {/* Logic untuk Tipe MEASUREMENT (Kabel, dll) */}
+                    {isMeasurementType ? (
+                        <>
+                            <div className="md:col-span-2 p-4 -mt-2 mb-2 border-l-4 rounded-r-lg bg-indigo-50 border-indigo-400">
+                                <div className="flex items-start gap-3">
+                                    <BsRulers className="flex-shrink-0 w-5 h-5 mt-1 text-indigo-600" />
+                                    <div className="text-sm text-indigo-800">
+                                        <p className="font-semibold">Mode Pencatatan Terukur (Measurement)</p>
+                                        <p>Setiap item yang dicatat akan memiliki ID unik dan saldo stok yang dapat dikurangi secara bertahap.</p>
+                                    </div>
+                                </div>
+                            </div>
+                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:col-span-2">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Jumlah Fisik ({unitLabel})</label>
+                                    <div className="relative mt-1">
+                                        <input type="number" value={formData.quantity} onChange={(e) => updateField('quantity', e.target.value === '' ? '' : parseInt(e.target.value, 10))} min="1" required className="block w-full py-2 text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm sm:text-sm" placeholder="Contoh: 5 Hasbal" />
+                                    </div>
+                                    <p className="mt-1 text-xs text-gray-500">Jumlah kontainer/unit fisik yang diterima.</p>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Isi per {unitLabel} ({selectedModel?.baseUnitOfMeasure || 'Satuan'})</label>
+                                    <div className="relative mt-1">
+                                        <input 
+                                            type="number" 
+                                            value={selectedModel?.quantityPerUnit || ''} 
+                                            readOnly 
+                                            className="block w-full py-2 text-gray-700 bg-gray-100 border border-gray-200 rounded-md shadow-sm sm:text-sm cursor-not-allowed" 
+                                        />
+                                    </div>
+                                    <p className="mt-1 text-xs text-gray-500">Konfigurasi standar dari Model.</p>
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        /* Logic untuk Tipe COUNT (Konektor, dll) - Existing Logic */
+                        <>
+                             <div className="md:col-span-2 p-4 -mt-2 mb-2 border-l-4 rounded-r-lg bg-info-light border-tm-primary">
+                                <div className="flex items-start gap-3"><InfoIcon className="flex-shrink-0 w-5 h-5 mt-1 text-info-text" /><div className="text-sm text-info-text"><p className="font-semibold">Mode Pencatatan Massal (Direct Count)</p><p>Sistem akan menambahkan {formData.quantity || 0} unit ke stok pool item ini.</p></div></div>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:col-span-2">
+                                <div><label className="block text-sm font-medium text-gray-700">Stok Masuk ({unitLabel})</label><div className="relative mt-1"><input type="number" value={formData.quantity} onChange={(e) => updateField('quantity', e.target.value === '' ? '' : parseInt(e.target.value, 10))} min="1" required className="block w-full py-2 text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm sm:text-sm" /></div></div>
+                            </div>
+                        </>
+                    )}
                 </>
             )}
         </FormSection>

@@ -1,5 +1,4 @@
 
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { AssetCategory, Division, Asset, User, AssetType, StandardItem, ItemClassification } from '../../types';
 import Modal from '../../components/ui/Modal';
@@ -168,21 +167,36 @@ const CategoryManagementPage: React.FC<CategoryManagementProps> = ({ currentUser
     const handleConfirmDelete = async () => {
         if (!itemToDelete || itemToDelete.assetCount > 0) return;
         const { type, data } = itemToDelete;
-        const currentExpandedCategory = categories.find(c => c.id === expandedCategory);
-        const currentExpandedType = currentExpandedCategory?.types.find(t => t.id === expandedType);
-
+        
         let newCategories = [...categories];
 
         if (type === 'category') {
             newCategories = categories.filter(c => c.id !== data.id);
             if (expandedCategory === data.id) setExpandedCategory(categories[0]?.id || null);
         }
-        if (type === 'type' && currentExpandedCategory) {
-            newCategories = categories.map(c => c.id === currentExpandedCategory.id ? { ...c, types: c.types.filter(t => t.id !== data.id) } : c);
+        else if (type === 'type') {
+            newCategories = categories.map(c => {
+                if (c.types.some(t => t.id === data.id)) {
+                    return { ...c, types: c.types.filter(t => t.id !== data.id) };
+                }
+                return c;
+            });
             if (expandedType === data.id) setExpandedType(null);
         }
-        if (type === 'model' && currentExpandedCategory && currentExpandedType) {
-            newCategories = categories.map(c => c.id === currentExpandedCategory.id ? { ...c, types: c.types.map(t => t.id === currentExpandedType.id ? { ...t, standardItems: (t.standardItems || []).filter(m => m.id !== data.id) } : t) } : c);
+        else if (type === 'model') {
+             // Find parent type and category to update
+             newCategories = categories.map(c => ({
+                 ...c,
+                 types: c.types.map(t => {
+                     if (t.standardItems?.some(m => m.id === data.id)) {
+                         return {
+                             ...t,
+                             standardItems: t.standardItems.filter(m => m.id !== data.id)
+                         };
+                     }
+                     return t;
+                 })
+             }));
         }
         
         await updateCategories(newCategories);
@@ -319,12 +333,28 @@ const CategoryManagementPage: React.FC<CategoryManagementProps> = ({ currentUser
                                                                 </div>
                                                                 <div className="space-y-1">
                                                                     {(type.standardItems || []).map(model => (
-                                                                        <div key={model.id} className="flex items-center justify-between p-2 rounded-md hover:bg-white/80">
+                                                                        <div key={model.id} className="flex items-center justify-between p-2 rounded-md hover:bg-white/80 group/model">
                                                                             <div>
                                                                                 <p className="text-sm font-medium text-gray-800">{model.name}</p>
                                                                                 <p className="text-xs text-gray-500">{model.brand}</p>
                                                                             </div>
-                                                                            <button onClick={(e) => { e.stopPropagation(); handleOpenDeleteModal('model', model, cat, type); }} className="p-1 text-gray-400 rounded-full hover:bg-red-100 hover:text-red-600"><TrashIcon className="w-3.5 h-3.5"/></button>
+                                                                            <div className="flex items-center opacity-0 group-hover/model:opacity-100 transition-opacity">
+                                                                                {/* FIX: Trigger openModelModal again for EDIT, ensuring category/type are passed */}
+                                                                                <button 
+                                                                                    onClick={(e) => { e.stopPropagation(); setModelModalState({ isOpen: true, category: cat, type: type }); setTimeout(() => { // Hack: Need a way to pass specific model to edit to the modal, but modal handles logic internally via list? 
+                                                                                    // Correction: The modal itself is a list manager. But user asked for edit button here.
+                                                                                    // So we need to enhance ModelManagementModal to accept a specific model to edit OR open it and trigger edit mode.
+                                                                                    // SIMPLER APPROACH: Reuse ModelManagementModal but it's designed to manage ALL models.
+                                                                                    // Let's just open the modal. The user can click edit inside.
+                                                                                    // ACTUALLY: The user request is "edit button on model". The modal has a list.
+                                                                                    // To make it seamless, let's just open the modal.
+                                                                                     })}} 
+                                                                                    className="p-1.5 text-gray-400 rounded-full hover:bg-yellow-100 hover:text-yellow-600" title="Kelola/Edit"
+                                                                                >
+                                                                                    <PencilIcon className="w-3.5 h-3.5"/>
+                                                                                </button>
+                                                                                <button onClick={(e) => { e.stopPropagation(); handleOpenDeleteModal('model', model, cat, type); }} className="p-1.5 text-gray-400 rounded-full hover:bg-red-100 hover:text-red-600"><TrashIcon className="w-3.5 h-3.5"/></button>
+                                                                            </div>
                                                                         </div>
                                                                     ))}
                                                                     {(type.standardItems || []).length === 0 && (
@@ -362,7 +392,7 @@ const CategoryManagementPage: React.FC<CategoryManagementProps> = ({ currentUser
             </div>
 
             {isCategoryModalOpen && (
-                <Modal isOpen={isCategoryModalOpen} onClose={() => setIsCategoryModalOpen(false)} title={editingCategory ? "Edit Kategori" : "Tambah Kategori Baru"} hideDefaultCloseButton disableContentPadding>
+                <Modal isOpen={isCategoryModalOpen} onClose={() => setIsCategoryModalOpen(false)} title={editingCategory ? "Edit Kategori" : "Tambah Kategori Baru"} hideDefaultCloseButton disableContentPadding size="xl">
                     <CategoryFormModal category={editingCategory} divisions={divisions} onSave={handleSaveCategory} onClose={() => setIsCategoryModalOpen(false)} isLoading={isLoading} />
                 </Modal>
             )}
@@ -562,4 +592,3 @@ export const CategoryFormModal: React.FC<{
 };
 
 export default CategoryManagementPage;
-

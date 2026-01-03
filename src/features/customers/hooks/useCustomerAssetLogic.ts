@@ -27,6 +27,7 @@ export const useCustomerAssetLogic = () => {
 
     // 2. Get Available Materials (Bulk Items)
     // Syarat: Kategori = isCustomerInstallable, Tracking = Bulk
+    // UPDATE: Logic satuan diperbaiki untuk mendukung Measurement vs Count
     const materialOptions = useMemo(() => {
         const options: { value: string; label: string; unit: string; category: string }[] = [];
         const processedKeys = new Set<string>();
@@ -34,14 +35,26 @@ export const useCustomerAssetLogic = () => {
         categories.forEach(cat => {
             if (cat.isCustomerInstallable) {
                 cat.types.forEach(type => {
-                    if (type.trackingMethod === 'bulk') {
+                    // Cek apakah tipe ini adalah material/bulk
+                    if (type.classification === 'material' || type.trackingMethod === 'bulk') {
                         (type.standardItems || []).forEach(item => {
                             const key = `${item.name}|${item.brand}`;
                             if (!processedKeys.has(key)) {
+                                // LOGIC PENENTUAN SATUAN
+                                // Jika tipe 'measurement' (Kabel), gunakan baseUnitOfMeasure (Meter).
+                                // Jika tipe 'count' (Konektor), gunakan unitOfMeasure (Pcs).
+                                let unit = 'Pcs';
+                                
+                                if (item.bulkType === 'measurement') {
+                                    unit = item.baseUnitOfMeasure || type.unitOfMeasure || 'Meter';
+                                } else {
+                                    unit = item.unitOfMeasure || type.unitOfMeasure || 'Pcs';
+                                }
+
                                 options.push({
                                     value: key,
                                     label: `${item.name} - ${item.brand}`,
-                                    unit: type.baseUnitOfMeasure || 'pcs',
+                                    unit: unit,
                                     category: cat.name
                                 });
                                 processedKeys.add(key);
