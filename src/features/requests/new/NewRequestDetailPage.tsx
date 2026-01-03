@@ -575,15 +575,6 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                         );
                                     })}
                                 </tbody>
-                                {canViewPrice && (
-                                     <tfoot className="bg-slate-50 border-t border-slate-200">
-                                        <tr>
-                                            <td colSpan={7} className="p-4 text-center font-bold text-slate-800 text-base">
-                                                Estimasi Total: <span className="text-xl text-tm-primary ml-2 font-mono">Rp. {calculatedTotalValue.toLocaleString('id-ID')}</span>
-                                            </td>
-                                        </tr>
-                                     </tfoot>
-                                )}
                             </table>
                         </div>
                     </section>
@@ -637,11 +628,22 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                     );
                                 })}
                             </div>
+                            <div className="mt-6 flex justify-end items-center border-t border-tm-primary/20 pt-4">
+                                <div className="text-right">
+                                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Estimasi Total Keseluruhan</p>
+                                    <p className="text-2xl font-mono font-black text-tm-primary">Rp {calculatedTotalValue.toLocaleString('id-ID')}</p>
+                                </div>
+                            </div>
                         </section>
                     )}
 
                     {request.purchaseDetails && canViewPrice && (
-                        <PurchaseDetailsView request={request} details={request.purchaseDetails} currentUser={currentUser} />
+                        <PurchaseDetailsView 
+                            request={request} 
+                            details={request.purchaseDetails} 
+                            currentUser={currentUser} 
+                            totalValue={calculatedTotalValue} // ADDED
+                        />
                     )}
 
                     {request.isRegistered && (

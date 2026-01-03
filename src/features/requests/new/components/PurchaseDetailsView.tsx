@@ -6,7 +6,7 @@ import { hasPermission } from '../../../../utils/permissions';
 
 const canViewPrice = (user: User) => hasPermission(user, 'requests:approve:purchase');
 
-export const PurchaseDetailsView: React.FC<{ request: Request, details: Record<number, PurchaseDetails>, currentUser: User }> = ({ request, details, currentUser }) => (
+export const PurchaseDetailsView: React.FC<{ request: Request, details: Record<number, PurchaseDetails>, currentUser: User, totalValue: number }> = ({ request, details, currentUser, totalValue }) => (
     <section>
         <div className="flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
             <ShoppingCartIcon className="w-5 h-5 text-tm-primary" />
@@ -83,6 +83,15 @@ export const PurchaseDetailsView: React.FC<{ request: Request, details: Record<n
                         return null;
                     })}
                 </tbody>
+                {canViewPrice(currentUser) && (
+                     <tfoot className="bg-slate-50 border-t border-slate-200">
+                        <tr>
+                            <td colSpan={8} className="p-4 text-center font-bold text-slate-800 text-base">
+                                Estimasi Total: <span className="text-xl text-tm-primary ml-2 font-mono">Rp. {totalValue.toLocaleString('id-ID')}</span>
+                            </td>
+                        </tr>
+                     </tfoot>
+                )}
             </table>
         </div>
     </section>
