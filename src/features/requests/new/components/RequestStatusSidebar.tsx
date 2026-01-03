@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Request, User, ItemStatus } from '../../../../types';
 import { InfoIcon } from '../../../../components/icons/InfoIcon';
@@ -36,6 +35,8 @@ interface RequestStatusSidebarProps {
     onInitiateHandoverFromRequest: (req: Request) => void;
     // New prop for smart transition
     isStagingComplete?: boolean;
+    // Added for deep linking
+    onShowPreview: (data: any) => void;
 }
 
 export const RequestStatusSidebar: React.FC<RequestStatusSidebarProps> = (props) => {
@@ -72,7 +73,8 @@ export const RequestStatusSidebar: React.FC<RequestStatusSidebarProps> = (props)
             case ItemStatus.COMPLETED:
             case ItemStatus.REJECTED:
             case ItemStatus.CANCELLED:
-                return <TerminalActions request={request} />;
+                // FIX: Pass uiProps to TerminalActions to enable Handover linking
+                return <TerminalActions request={request} uiProps={props} />;
             default:
                 return null;
         }

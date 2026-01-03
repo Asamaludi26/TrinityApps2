@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Request, User, ItemStatus } from '../../../../../types';
 import { ActionButton } from '../../../../../components/ui/ActionButton';
@@ -13,10 +12,11 @@ import { ArchiveBoxIcon } from '../../../../../components/icons/ArchiveBoxIcon';
 import { RegisterIcon } from '../../../../../components/icons/RegisterIcon';
 import { HandoverIcon } from '../../../../../components/icons/HandoverIcon';
 import { InfoIcon } from '../../../../../components/icons/InfoIcon';
-import { BsHourglassSplit } from 'react-icons/bs';
+import { BsHourglassSplit, BsFileEarmarkCheck, BsArrowRight } from 'react-icons/bs';
 import { hasPermission } from '../../../../../utils/permissions';
 import { LABELS } from '../../../../../constants/labels';
-import { useRequestStore } from '../../../../../stores/useRequestStore'; // Direct Store Access
+import { useRequestStore } from '../../../../../stores/useRequestStore';
+import { useTransactionStore } from '../../../../../stores/useTransactionStore';
 
 // --- SHARED WAITING CARD ---
 export const WaitingStateCard: React.FC<{ title: string; message: string; icon?: React.FC<{className?:string}> }> = ({ title, message, icon: Icon = BsHourglassSplit }) => (
@@ -183,10 +183,14 @@ export const ProcurementActions: React.FC<{ request: Request; currentUser: User;
 
 // --- 5. ARRIVAL & HANDOVER ACTIONS ---
 export const ArrivalActions: React.FC<{ request: Request; currentUser: User; uiProps: any }> = ({ request, currentUser, uiProps }) => {
-    const { onOpenStaging, onInitiateHandoverFromRequest, isLoading, isStagingComplete } = uiProps;
+    const { onOpenStaging, onInitiateHandoverFromRequest, isLoading, isStagingComplete, onShowPreview } = uiProps;
+    const handovers = useTransactionStore(state => state.handovers);
     const canManageAssets = hasPermission(currentUser, 'assets:create');
     const canManageHandover = hasPermission(currentUser, 'assets:handover');
     const canApproveFinal = hasPermission(currentUser, 'requests:approve:final'); // CEO bisa bypass
+
+    // Support Multiple/Partial Handovers
+    const relatedHandovers = handovers.filter(h => h.woRoIntNumber === request.id);
 
     if (request.status === ItemStatus.ARRIVED) {
         if (canManageAssets || canApproveFinal) {
@@ -199,34 +203,98 @@ export const ArrivalActions: React.FC<{ request: Request; currentUser: User; uiP
     }
 
     if (request.status === ItemStatus.AWAITING_HANDOVER) {
-         if (canManageHandover || canApproveFinal) {
-             return <ActionButton onClick={() => onInitiateHandoverFromRequest(request)} disabled={isLoading} text={LABELS.BTN_CREATE_HANDOVER} color="primary" icon={HandoverIcon} />;
-         }
-         return <WaitingStateCard title={LABELS.MSG_READY_HANDOVER} message={LABELS.MSG_DESC_READY_HANDOVER} icon={CheckIcon} />;
+         return (
+             <div className="space-y-4">
+                 {/* List Existing Handovers (Partial) */}
+                 {relatedHandovers.length > 0 && (
+                     <div className="space-y-2">
+                         <p className="text-xs font-bold text-gray-500 uppercase">Handover Dibuat:</p>
+                         {relatedHandovers.map(ho => (
+                             <button
+                                key={ho.id}
+                                onClick={() => onShowPreview({ type: 'handover', id: ho.id })}
+                                className="w-full flex items-center justify-between p-2 text-xs bg-white border border-gray-200 rounded-lg hover:bg-gray-50 text-left"
+                             >
+                                 <span className="font-semibold text-gray-700">{ho.docNumber}</span>
+                                 <span className="text-gray-500">{new Date(ho.handoverDate).toLocaleDateString('id-ID')}</span>
+                             </button>
+                         ))}
+                     </div>
+                 )}
+
+                 {/* Create New Handover Button */}
+                 {canManageHandover || canApproveFinal ? (
+                     <ActionButton onClick={() => onInitiateHandoverFromRequest(request)} disabled={isLoading} text={LABELS.BTN_CREATE_HANDOVER} color="primary" icon={HandoverIcon} />
+                 ) : (
+                     <WaitingStateCard title={LABELS.MSG_READY_HANDOVER} message={LABELS.MSG_DESC_READY_HANDOVER} icon={CheckIcon} />
+                 )}
+             </div>
+         );
     }
 
     return null;
 };
 
-// --- 6. TERMINAL ACTIONS ---
-export const TerminalActions: React.FC<{ request: Request }> = ({ request }) => {
+// --- 6. TERMINAL ACTIONS (COMPLETED / REJECTED) ---
+export const TerminalActions: React.FC<{ request: Request, uiProps?: any }> = ({ request, uiProps }) => {
+    const handovers = useTransactionStore(state => state.handovers);
+    const { onShowPreview } = uiProps || {};
+
     let icon = CheckIcon;
     let color = "text-green-500";
+    let bgColor = "bg-green-50";
+    let borderColor = "border-green-200";
     let title = "Permintaan Selesai";
+    let subtext = "Seluruh proses telah rampung.";
+
+    // Cari SEMUA dokumen handover terkait (karena bisa parsial)
+    const linkedHandovers = handovers.filter(h => h.woRoIntNumber === request.id);
 
     if (request.status === ItemStatus.REJECTED) {
-        icon = CloseIcon; color = "text-red-500"; title = "Permintaan Ditolak";
+        icon = CloseIcon; 
+        color = "text-red-500"; 
+        bgColor = "bg-red-50";
+        borderColor = "border-red-200";
+        title = "Permintaan Ditolak";
+        subtext = request.rejectionReason 
+            ? `Alasan: "${request.rejectionReason}"` 
+            : "Permintaan ini tidak disetujui.";
     } else if (request.status === ItemStatus.CANCELLED) {
-        icon = CloseIcon; color = "text-gray-400"; title = "Permintaan Dibatalkan";
+        icon = CloseIcon; 
+        color = "text-gray-400"; 
+        bgColor = "bg-gray-50";
+        borderColor = "border-gray-200";
+        title = "Permintaan Dibatalkan";
+        subtext = "Permintaan ini ditarik kembali oleh pemohon.";
     }
 
     const Icon = icon;
 
     return (
-        <div className="text-center p-4 bg-gray-50 border border-gray-200 rounded-lg">
-            <Icon className={`w-10 h-10 mx-auto mb-2 ${color}`} />
-            <p className="text-sm font-semibold text-gray-800">{title}</p>
-            <p className="text-xs text-gray-500 mt-1">Tidak ada aksi lebih lanjut untuk permintaan ini.</p>
+        <div className={`text-center p-5 ${bgColor} border ${borderColor} rounded-xl shadow-sm animate-fade-in-up`}>
+            <div className={`w-12 h-12 mx-auto mb-3 rounded-full flex items-center justify-center bg-white ${color} shadow-sm border border-gray-100`}>
+                <Icon className="w-6 h-6" />
+            </div>
+            
+            <p className="text-sm font-bold text-gray-800">{title}</p>
+            <p className="text-xs text-gray-500 mt-1 mb-4 leading-relaxed px-2">{subtext}</p>
+
+            {/* Smart Action: Link to ALL Handover Docs */}
+            {request.status === ItemStatus.COMPLETED && linkedHandovers.length > 0 && onShowPreview && (
+                <div className="pt-3 border-t border-green-200/60 mt-2 space-y-2">
+                     <p className="text-[10px] font-bold text-green-700 uppercase tracking-wider mb-1">Dokumen Serah Terima</p>
+                     {linkedHandovers.map(ho => (
+                        <button 
+                            key={ho.id}
+                            onClick={() => onShowPreview({ type: 'handover', id: ho.id })}
+                            className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold text-green-800 bg-white border border-green-200 rounded-lg hover:bg-green-50 transition-colors shadow-sm"
+                        >
+                            <BsFileEarmarkCheck className="w-3.5 h-3.5" />
+                            {ho.docNumber} <BsArrowRight className="w-3 h-3"/>
+                        </button>
+                     ))}
+                </div>
+            )}
         </div>
     );
 };

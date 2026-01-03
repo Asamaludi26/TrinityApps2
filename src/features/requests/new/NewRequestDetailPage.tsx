@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Request, ItemStatus, User, Asset, AssetCategory, PurchaseDetails, Activity, Division } from '../../../types';
 import { DetailPageLayout } from '../../../components/layout/DetailPageLayout';
@@ -526,7 +525,9 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                         // Cek progress registrasi per item
                                         const registeredCount = request.partiallyRegisteredItems?.[item.id] || 0;
                                         const targetQty = approvedQuantity ?? item.quantity;
-                                        const isItemFullyRegistered = !isRejected && !isStockAllocated && registeredCount >= targetQty && request.status === ItemStatus.ARRIVED;
+                                        
+                                        // FIX: Remove status check. Badge stays if items are fully registered.
+                                        const isItemFullyRegistered = !isRejected && !isStockAllocated && registeredCount >= targetQty;
 
                                         let rowClass = 'hover:bg-slate-50/50 transition-colors';
                                         if (isRejected) rowClass += ' bg-red-50/30 text-slate-400';

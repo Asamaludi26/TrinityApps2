@@ -117,7 +117,11 @@ export const mockAssets: Asset[] = [
 
     // E. MATERIAL (Bulk Item)
     { id: 'MAT-001', name: 'Dropcore 1 Core', category: 'Infrastruktur Fiber Optik', type: 'Kabel Dropcore', brand: 'FiberHome', status: AssetStatus.IN_STORAGE, condition: AssetCondition.BRAND_NEW, location: 'Gudang Kabel', registrationDate: d(-30), recordedBy: 'Admin Logistik', purchasePrice: 1500, attachments: [], activityLog: [] },
-    { id: 'MAT-002', name: 'Adaptor SC-UPC', category: 'Infrastruktur Fiber Optik', type: 'Konektor / Adaptor', brand: 'Generic', status: AssetStatus.IN_STORAGE, condition: AssetCondition.BRAND_NEW, location: 'Gudang Acc', registrationDate: d(-10), recordedBy: 'Admin Logistik', purchasePrice: 5000, attachments: [], activityLog: [] }
+    { id: 'MAT-002', name: 'Adaptor SC-UPC', category: 'Infrastruktur Fiber Optik', type: 'Konektor / Adaptor', brand: 'Generic', status: AssetStatus.IN_STORAGE, condition: AssetCondition.BRAND_NEW, location: 'Gudang Acc', registrationDate: d(-10), recordedBy: 'Admin Logistik', purchasePrice: 5000, attachments: [], activityLog: [] },
+
+    // F. ASSETS FROM SCENARIO RO-260101-0005 (Baru Saja Dicatat)
+    { id: 'AST-MIK-001', name: 'Mikrotik CCR1009', category: 'Perangkat Jaringan (Core)', type: 'Router Core', brand: 'Mikrotik', serialNumber: 'SN-MIK-001', status: AssetStatus.IN_STORAGE, condition: AssetCondition.BRAND_NEW, location: 'Gudang Utama', registrationDate: d(0), recordedBy: 'Admin Logistik', purchasePrice: 7500000, attachments: [], activityLog: [], woRoIntNumber: 'RO-260101-0005' },
+    { id: 'AST-MIK-002', name: 'Mikrotik CCR1009', category: 'Perangkat Jaringan (Core)', type: 'Router Core', brand: 'Mikrotik', serialNumber: 'SN-MIK-002', status: AssetStatus.IN_STORAGE, condition: AssetCondition.BRAND_NEW, location: 'Gudang Utama', registrationDate: d(0), recordedBy: 'Admin Logistik', purchasePrice: 7500000, attachments: [], activityLog: [], woRoIntNumber: 'RO-260101-0005' }
 ];
 
 // --- 4. CUSTOMERS ---
@@ -173,95 +177,55 @@ export const initialMockRequests: Request[] = [
         itemStatuses: { 1: { status: 'approved', approvedQuantity: 2 }, 2: { status: 'approved', approvedQuantity: 4 } },
         activityLog: []
     },
-    // Case 3: ARRIVED
+    // Case 3: SCENARIO BUG FIX TEST - SIAP SERAH TERIMA
+    // Semua barang sudah dicatat (isRegistered=true), Status=AWAITING_HANDOVER
     {
-        id: generateId('RO', -5, '0001'),
-        docNumber: generateId('RO', -5, '0001'),
-        requester: 'Staff NOC', 
-        division: 'NOC', 
-        requestDate: d(-5), 
-        status: ItemStatus.ARRIVED,
-        logisticApprover: 'Admin Logistik', logisticApprovalDate: d(-4),
-        finalApprover: 'Super Admin', finalApprovalDate: d(-3),
-        order: { type: 'Regular Stock' },
-        items: [{ id: 1, itemName: 'Laptop Admin', itemTypeBrand: 'Lenovo', quantity: 1, keterangan: 'Untuk admin baru' }],
-        itemStatuses: { 1: { status: 'approved', approvedQuantity: 1 } },
-        purchaseDetails: { 1: { purchasePrice: 8500000, vendor: 'Bhinneka', poNumber: 'PO-099', invoiceNumber: 'INV-099', purchaseDate: d(-2), warrantyEndDate: d(365), filledBy: 'Admin Purchase', fillDate: d(-2) } },
-        arrivalDate: d(0),
-        activityLog: []
-    },
-    // Case 4: NEW TESTING REQUEST (4 Assets, Qty 2 each, Status: ARRIVED to allow Registration Testing)
-    {
-        id: generateId('RO', -2, '0005'),
-        docNumber: generateId('RO', -2, '0005'),
+        id: 'RO-260101-0005',
+        docNumber: 'RO-260101-0005',
         requester: 'Leader Network',
         division: 'Network Engineering',
-        requestDate: d(-2),
-        status: ItemStatus.ARRIVED, // Set ke ARRIVED agar tombol "Catat Aset" muncul
-        logisticApprover: 'Admin Logistik', logisticApprovalDate: d(-1),
-        finalApprover: 'Super Admin', finalApprovalDate: d(-1),
+        requestDate: '2026-01-01T23:07:23.000Z',
+        status: ItemStatus.AWAITING_HANDOVER, // Status Kunci untuk tes
+        logisticApprover: 'Admin Logistik', 
+        logisticApprovalDate: d(-2),
+        finalApprover: 'Super Admin', 
+        finalApprovalDate: d(-2),
         order: { type: 'Project Based', project: 'Upgrade Infrastruktur Server' },
         items: [
-            { id: 1, itemName: 'Mikrotik CCR1009', itemTypeBrand: 'Mikrotik', quantity: 2, keterangan: 'Main & Backup Router', categoryId: '1', typeId: '11' },
-            { id: 2, itemName: 'Cisco Catalyst 2960', itemTypeBrand: 'Cisco', quantity: 2, keterangan: 'Distribution Switch', categoryId: '1', typeId: '12' },
-            { id: 3, itemName: 'Unifi AP AC Lite', itemTypeBrand: 'Ubiquiti', quantity: 2, keterangan: 'WiFi Area Kantor', categoryId: '2', typeId: '22' },
-            { id: 4, itemName: 'OTDR MaxTester', itemTypeBrand: 'Exfo', quantity: 2, keterangan: 'Alat ukur tim lapangan', categoryId: '4', typeId: '42' }
+            { id: 1, itemName: 'Mikrotik CCR1009', itemTypeBrand: 'Mikrotik', quantity: 2, keterangan: 'Main Router', categoryId: '1', typeId: '11' }
         ],
         itemStatuses: {
-            1: { status: 'approved', approvedQuantity: 2 },
-            2: { status: 'approved', approvedQuantity: 2 },
-            3: { status: 'approved', approvedQuantity: 2 },
-            4: { status: 'approved', approvedQuantity: 2 }
+            1: { status: 'approved', approvedQuantity: 2 }
         },
         purchaseDetails: {
-             1: { purchasePrice: 7500000, vendor: 'Citra Web', poNumber: 'PO-TEST-001', invoiceNumber: 'INV-001', purchaseDate: d(-1), filledBy: 'Admin Purchase', fillDate: d(-1) },
-             2: { purchasePrice: 5000000, vendor: 'Partner Cisco', poNumber: 'PO-TEST-001', invoiceNumber: 'INV-001', purchaseDate: d(-1), filledBy: 'Admin Purchase', fillDate: d(-1) },
-             3: { purchasePrice: 1500000, vendor: 'Ubiquiti Store', poNumber: 'PO-TEST-001', invoiceNumber: 'INV-001', purchaseDate: d(-1), filledBy: 'Admin Purchase', fillDate: d(-1) },
-             4: { purchasePrice: 45000000, vendor: 'Exfo Indo', poNumber: 'PO-TEST-001', invoiceNumber: 'INV-001', purchaseDate: d(-1), filledBy: 'Admin Purchase', fillDate: d(-1) },
+             1: { purchasePrice: 7500000, vendor: 'Citra Web', poNumber: 'PO-TEST-005', invoiceNumber: 'INV-005', purchaseDate: d(-1), filledBy: 'Admin Purchase', fillDate: d(-1) }
         },
         arrivalDate: d(0),
+        isRegistered: true, // Flag Kunci
+        partiallyRegisteredItems: { 1: 2 }, // 2 dari 2 sudah diregister
         activityLog: []
     }
 ];
 
 // --- 6. LOAN REQUESTS (RL) ---
 export const mockLoanRequests: LoanRequest[] = [
-    // Case 1: Active Loan (Sedang Dipinjam)
     {
-        id: generateId('RL', -5, '0001'), // RL-YYMMDD-NNNN
+        id: generateId('RL', -5, '0001'),
         requester: 'Staff Teknisi', division: 'Technical Support', requestDate: d(-5), status: LoanRequestStatus.ON_LOAN,
         items: [{ id: 1, itemName: 'Fusion Splicer 90S', brand: 'Fujikura', quantity: 1, keterangan: 'Maintenance Area Selatan', returnDate: d(2) }],
         approver: 'Admin Logistik', approvalDate: d(-5),
         assignedAssetIds: { 1: ['AST-003'] },
         notes: 'Peminjaman alat kerja reguler'
-    },
-    // Case 2: Overdue (Terlambat)
-    {
-        id: generateId('RL', -10, '0001'), 
-        requester: 'Leader Network', division: 'Network Engineering', requestDate: d(-10), status: LoanRequestStatus.OVERDUE,
-        items: [{ id: 1, itemName: 'OTDR MaxTester', brand: 'Exfo', quantity: 1, keterangan: 'Project Audit', returnDate: d(-2) }],
-        approver: 'Admin Logistik', approvalDate: d(-10),
-        assignedAssetIds: { 1: ['AST-005'] }, 
-        notes: 'Project audit jaringan'
-    },
-    // Case 3: Pending Return (Menunggu Verifikasi)
-    {
-        id: generateId('RL', -3, '0001'), 
-        requester: 'Staff NOC', division: 'NOC', requestDate: d(-3), status: LoanRequestStatus.AWAITING_RETURN,
-        items: [{ id: 1, itemName: 'Laptop Admin', brand: 'Lenovo', quantity: 1, keterangan: 'Pinjam sementara', returnDate: d(0) }],
-        approver: 'Admin Logistik', approvalDate: d(-3),
-        assignedAssetIds: { 1: ['AST-008'] }, 
-        notes: 'Laptop cadangan'
     }
 ];
 
 // --- 7. RETURNS (RR) ---
 export const mockReturns: AssetReturn[] = [
     {
-        id: generateId('RR', 0, '0001'), // RR-YYMMDD-NNNN
+        id: generateId('RR', 0, '0001'), 
         docNumber: generateId('RR', 0, '0001'), 
         returnDate: d(0), 
-        loanRequestId: generateId('RL', -3, '0001'), // Link to Loan Case 3
+        loanRequestId: generateId('RL', -3, '0001'),
         returnedBy: 'Staff NOC',
         status: AssetReturnStatus.PENDING_APPROVAL,
         items: [{ assetId: 'AST-008', assetName: 'Laptop Admin', returnedCondition: AssetCondition.GOOD, notes: 'Sudah selesai dipakai', status: 'PENDING' }]
@@ -270,7 +234,6 @@ export const mockReturns: AssetReturn[] = [
 
 // --- 8. TRANSACTIONS (HO, DSM, MNT, INST) ---
 export const mockHandovers: Handover[] = [
-    // Case 1: Handover General / Manual
     { 
         id: generateId('HO', -100, '0001'), 
         docNumber: generateId('HO', -100, '0001'), 
@@ -278,16 +241,6 @@ export const mockHandovers: Handover[] = [
         menyerahkan: 'Admin Logistik', penerima: 'Staff Teknisi', mengetahui: 'Super Admin', 
         items: [{ id: 1, itemName: 'Fusion Splicer 90S', itemTypeBrand: 'Fujikura', conditionNotes: 'Baru', quantity: 1, checked: true, assetId: 'AST-003' }], 
         status: ItemStatus.COMPLETED 
-    },
-    // Case 2: Handover from Request (HO-RO)
-    {
-        id: generateId('HO-RO', -4, '0001'),
-        docNumber: generateId('HO-RO', -4, '0001'),
-        handoverDate: d(-4),
-        woRoIntNumber: generateId('RO', -5, '0001'), // Link to Request Case 3
-        menyerahkan: 'Admin Logistik', penerima: 'Staff NOC', mengetahui: 'Super Admin',
-        items: [{ id: 1, itemName: 'Laptop Admin', itemTypeBrand: 'Lenovo', conditionNotes: 'Baru', quantity: 1, checked: true }],
-        status: ItemStatus.COMPLETED
     }
 ];
 
@@ -307,7 +260,7 @@ export const mockDismantles: Dismantle[] = [
 export const mockInstallations: Installation[] = [
     { 
         id: generateId('INST', -45, '0001'), 
-        docNumber: generateId('WO-IKR', -45, '0001'), // Format WO-IKR-YYMMDD-NNNN
+        docNumber: generateId('WO-IKR', -45, '0001'),
         installationDate: d(-45), 
         technician: 'Staff Teknisi', customerId: 'CUST-001', customerName: 'PT. Maju Jaya', 
         assetsInstalled: [], materialsUsed: [{ itemName: 'Dropcore 1 Core', brand: 'FiberHome', quantity: 150, unit: 'Meter' }], 

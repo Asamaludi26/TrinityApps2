@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { CSSProperties } from 'react';
 
 interface SkeletonProps {
     className?: string;
@@ -22,9 +22,10 @@ export const Skeleton: React.FC<SkeletonProps> = ({
         rectangular: "rounded-md",
     };
 
-    const style: React.CSSProperties = {};
-    if (width) style.width = width;
-    if (height) style.height = height;
+    const style: CSSProperties = {
+        width,
+        height
+    };
 
     return (
         <div 

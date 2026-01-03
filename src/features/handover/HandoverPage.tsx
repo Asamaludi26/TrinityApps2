@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Handover, ItemStatus, Asset, User, PreviewData, Request, LoanRequest, LoanRequestStatus, AssetStatus } from '../../types';
 import { useNotification } from '../../providers/NotificationProvider';
@@ -41,13 +40,14 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
     const deleteHandover = useTransactionStore(state => state.deleteHandover);
     
     const updateAsset = useAssetStore(state => state.updateAsset);
+    const assets = useAssetStore(state => state.assets); // Need assets for validation logic
     const users = useMasterDataStore(state => state.users);
     const divisions = useMasterDataStore(state => state.divisions);
     const storeUser = useAuthStore(state => state.currentUser);
     
     // Request Store Actions
     const updateLoanRequest = useRequestStore(state => state.updateLoanRequest);
-    const updateRequest = useRequestStore(state => state.updateRequest); // Added for Procurement updates
+    const updateRequest = useRequestStore(state => state.updateRequest); 
     
     const currentUser = storeUser || props.currentUser!; 
 
@@ -119,8 +119,10 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
             await addHandover(newHandover);
 
             // 2. Update Assets Status & Location
+            const assetIdsInHandover: string[] = [];
             const assetUpdatePromises = data.items.map(item => {
                 if (item.assetId) {
+                    assetIdsInHandover.push(item.assetId);
                     return updateAsset(item.assetId, {
                         status: targetStatus,
                         currentUser: targetStatus === AssetStatus.IN_STORAGE ? null : data.penerima,
@@ -134,8 +136,8 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
             
             // 3. Update Source Document Status (Request / Loan)
             if (newHandover.woRoIntNumber) {
-                // A. Handle Loan Request (LREQ)
-                if (newHandover.woRoIntNumber.startsWith('LREQ-')) {
+                // A. Handle Loan Request (Prefix: RL or LREQ)
+                if (newHandover.woRoIntNumber.startsWith('RL-') || newHandover.woRoIntNumber.startsWith('LREQ-')) {
                     if (targetStatus === AssetStatus.IN_USE) {
                          await updateLoanRequest(newHandover.woRoIntNumber, {
                             status: LoanRequestStatus.ON_LOAN,
@@ -143,16 +145,44 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
                         });
                     }
                 } 
-                // B. Handle New Asset Request (REQ) - Procurement Flow
-                else if (newHandover.woRoIntNumber.startsWith('REQ-')) {
-                     // Asumsi: Jika handover dibuat untuk REQ ini, berarti item sudah diserahkan.
-                     // Untuk full production, backend harus cek apakah SEMUA item dalam request sudah di-handover (Partial Check).
-                     // Di sini kita set COMPLETED sebagai default behavior sukses.
-                     await updateRequest(newHandover.woRoIntNumber, {
-                         status: ItemStatus.COMPLETED,
-                         completionDate: new Date().toISOString(),
-                         completedBy: currentUser.name
-                     });
+                // B. Handle New Asset Request (Prefix: RO or REQ)
+                else if (newHandover.woRoIntNumber.startsWith('RO-') || newHandover.woRoIntNumber.startsWith('REQ-')) {
+                     // LOGIC PERBAIKAN: Cek apakah masih ada aset tersisa di gudang untuk request ini?
+                     // Jika sisa = 0, barulah status Request = COMPLETED.
+                     // Jika sisa > 0, status tetap AWAITING_HANDOVER (Partial Handover).
+                     
+                     // Ambil semua aset yang terdaftar untuk request ini
+                     const allAssetsForRequest = assets.filter(a => a.woRoIntNumber === newHandover.woRoIntNumber);
+                     
+                     // Hitung aset yang statusnya MASIH 'IN_STORAGE' (Belum diserahkan)
+                     // Kita perlu mengecualikan aset yang BARU SAJA kita update di langkah (2) di atas
+                     // karena state 'assets' mungkin belum refresh sepenuhnya di closure ini.
+                     
+                     const remainingInStorage = allAssetsForRequest.filter(a => 
+                         a.status === AssetStatus.IN_STORAGE && !assetIdsInHandover.includes(a.id)
+                     );
+
+                     if (remainingInStorage.length === 0) {
+                         // Full Completion
+                         await updateRequest(newHandover.woRoIntNumber, {
+                             status: ItemStatus.COMPLETED,
+                             completionDate: new Date().toISOString(),
+                             completedBy: currentUser.name,
+                             activityLog: [
+                                {
+                                    id: Date.now(),
+                                    author: 'System',
+                                    timestamp: new Date().toISOString(),
+                                    type: 'status_change',
+                                    payload: { text: `Request selesai. Seluruh aset telah diserahkan (Dokumen Terakhir: ${newHandover.docNumber}).` }
+                                }
+                             ]
+                         });
+                     } else {
+                         // Partial Handover - Log activity only
+                         // Request status stays 'AWAITING_HANDOVER'
+                         // Backend would ideally handle activity log appending
+                     }
                 }
             }
 
