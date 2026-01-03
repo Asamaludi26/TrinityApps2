@@ -4,6 +4,7 @@ import { Request, AssetCategory } from '../../../../types';
 import Modal from '../../../../components/ui/Modal';
 import { ArchiveBoxIcon } from '../../../../components/icons/ArchiveBoxIcon';
 import { ExclamationTriangleIcon } from '../../../../components/icons/ExclamationTriangleIcon';
+import { BsFileEarmarkText } from 'react-icons/bs';
 
 interface StagingModalProps {
     isOpen: boolean;
@@ -100,37 +101,32 @@ export const StagingModal: React.FC<StagingModalProps> = ({
                     <div>
                         <h4 className="font-bold text-tm-primary text-sm">Pilih Barang yang Diterima</h4>
                         <p className="text-sm text-blue-800 mt-1">
-                            Pilih <strong>satu</strong> item dari daftar di bawah untuk dicatat. Item yang sudah lengkap akan ditandai selesai.
+                            Pilih <strong>satu</strong> item dari daftar di bawah untuk dicatat. Data detail pembelian (Vendor, Harga, Tgl Beli) akan otomatis dimuat ke formulir pencatatan.
                         </p>
                     </div>
                 </div>
 
                 <div className="border border-slate-200 rounded-lg overflow-x-auto">
                     <table className="w-full text-sm text-left min-w-[900px]">
-                        <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
+                        <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200 text-xs uppercase tracking-wider">
                             <tr>
                                 <th className="p-3 w-10 text-center">Pilih</th>
-                                <th className="p-3">Kategori</th>
-                                <th className="p-3">Tipe Aset</th>
-                                <th className="p-3">Model / Nama Barang</th>
+                                <th className="p-3 w-10 text-center">No.</th>
+                                <th className="p-3">Kategori & Tipe</th>
+                                <th className="p-3">Nama Barang / Model</th>
                                 <th className="p-3">Brand</th>
-                                <th className="p-3 text-center">Qty (Approve/Sisa)</th>
-                                <th className="p-3">Vendor</th>
-                                <th className="p-3">Tanggal Beli</th>
-                                <th className="p-3">Dokumen</th>
+                                <th className="p-3 text-center">Qty (Sisa)</th>
+                                <th className="p-3">No. Dokumen Request</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {stagingItems.length > 0 ? stagingItems.map((item) => {
+                            {stagingItems.length > 0 ? stagingItems.map((item, index) => {
                                 const { approvedQty, remainingQty, isCompleted, categoryName, typeName } = item.derived;
-                                
-                                // Access Purchase Details (Safe Access)
-                                const details = request.purchaseDetails?.[item.id];
                                 
                                 return (
                                     <tr 
                                         key={item.id} 
-                                        className={`hover:bg-slate-50 transition-colors cursor-pointer ${isCompleted ? 'bg-gray-50 opacity-60 cursor-not-allowed' : 'bg-white'}`} 
+                                        className={`hover:bg-slate-50 transition-colors cursor-pointer ${isCompleted ? 'bg-gray-50 opacity-60 cursor-not-allowed' : selectedItemId === item.id ? 'bg-blue-50/60' : 'bg-white'}`} 
                                         onClick={() => !isCompleted && setSelectedItemId(item.id)}
                                     >
                                         <td className="p-3 text-center">
@@ -146,8 +142,13 @@ export const StagingModal: React.FC<StagingModalProps> = ({
                                                  />
                                             </div>
                                         </td>
-                                        <td className="p-3 text-slate-600 text-xs font-medium">{categoryName}</td>
-                                        <td className="p-3 text-slate-600 text-xs">{typeName}</td>
+                                        <td className="p-3 text-center text-slate-500 font-medium">
+                                            {index + 1}
+                                        </td>
+                                        <td className="p-3">
+                                            <div className="text-slate-800 font-medium">{categoryName}</div>
+                                            <div className="text-slate-500 text-xs">{typeName}</div>
+                                        </td>
                                         <td className="p-3 font-semibold text-slate-800">
                                             {item.itemName}
                                             {isCompleted && <span className="ml-2 text-[9px] text-green-600 bg-green-100 px-1.5 py-0.5 rounded font-bold border border-green-200">SELESAI</span>}
@@ -155,31 +156,27 @@ export const StagingModal: React.FC<StagingModalProps> = ({
                                         <td className="p-3 text-slate-600">{item.itemTypeBrand}</td>
                                         <td className="p-3 text-center">
                                             <div className="flex flex-col items-center">
-                                                <span className="text-xs text-slate-500">Total: {approvedQty}</span>
-                                                <span className={`font-bold px-2 py-0.5 rounded text-xs mt-0.5 ${remainingQty > 0 ? 'text-amber-700 bg-amber-100' : 'text-slate-400'}`}>
+                                                <span className={`font-bold px-2 py-0.5 rounded text-xs ${remainingQty > 0 ? 'text-amber-700 bg-amber-100' : 'text-slate-400 bg-slate-100'}`}>
                                                     Sisa: {remainingQty}
                                                 </span>
+                                                <span className="text-[10px] text-slate-400 mt-0.5">dari {approvedQty} unit</span>
                                             </div>
                                         </td>
-                                        {/* Purchase Details Columns with fallback */}
-                                        <td className="p-3 text-slate-600 text-xs">{details?.vendor || '-'}</td>
-                                        <td className="p-3 text-slate-600 text-xs">
-                                             <div className="flex flex-col gap-1">
-                                                <span>{details?.purchaseDate ? new Date(details.purchaseDate).toLocaleDateString('id-ID') : '-'}</span>
-                                             </div>
-                                        </td>
-                                        <td className="p-3 text-slate-600 text-xs">
-                                             <div className="flex flex-col gap-1">
-                                                 {details?.poNumber ? (
-                                                     <span className="font-bold bg-slate-100 px-1 rounded border border-slate-200 w-fit">{details.poNumber}</span>
-                                                 ) : '-'}
+                                        
+                                        {/* Kolom No. Dokumen (Request ID/Doc Number) */}
+                                        <td className="p-3 text-slate-600">
+                                             <div className="flex items-center gap-2">
+                                                 <BsFileEarmarkText className="text-slate-400 w-3 h-3" />
+                                                 <span className="font-mono font-medium text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 text-xs">
+                                                    {request.docNumber || request.id}
+                                                 </span>
                                              </div>
                                         </td>
                                     </tr>
                                 );
                             }) : (
                                 <tr>
-                                     <td colSpan={9} className="p-8 text-center text-slate-500 italic flex flex-col items-center justify-center w-full">
+                                     <td colSpan={7} className="p-8 text-center text-slate-500 italic flex flex-col items-center justify-center w-full">
                                         <ExclamationTriangleIcon className="w-8 h-8 text-slate-300 mb-2" />
                                         Tidak ada item valid untuk dicatat dalam request ini.
                                      </td>
