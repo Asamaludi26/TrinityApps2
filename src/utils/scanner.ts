@@ -1,3 +1,4 @@
+
 import { ParsedScanResult } from '../types';
 
 // Universal parser for QR and Barcodes
@@ -10,20 +11,30 @@ export const parseScanData = (data: string): ParsedScanResult => {
     const ASSET_ID_REGEX = /^AST-\d{4,}$/;
     const SERIAL_NUMBER_REGEX = /^[A-Z0-9-]{6,}$/i;
 
-    // 1. Try to parse as "Smart QR" JSON
+    // 1. Try to parse as JSON (Smart QR)
     try {
         const jsonData = JSON.parse(raw);
-        if (jsonData.type === 'asset' && (jsonData.id || jsonData.sn || jsonData.mac)) {
+        
+        // V1 Format (Legacy): { type: 'asset', id: '...' }
+        if (jsonData.type === 'asset' && (jsonData.id || jsonData.sn)) {
             result.id = jsonData.id;
             result.serialNumber = jsonData.sn;
             result.macAddress = jsonData.mac ? jsonData.mac.replace(/[:-]/g, '').toUpperCase() : undefined;
-            if (jsonData.name) {
-                result.name = jsonData.name;
-            }
+            if (jsonData.name) result.name = jsonData.name;
             return result;
         }
+
+        // V2 Format (Minified): { t: 'a', i: '...' }
+        // t = type (a=asset), i = id, s = serial, m = mac
+        if (jsonData.t === 'a' && jsonData.i) {
+            result.id = jsonData.i;
+            if (jsonData.s) result.serialNumber = jsonData.s;
+            if (jsonData.m) result.macAddress = jsonData.m;
+            return result;
+        }
+
     } catch (e) {
-        // Not a JSON, continue
+        // Not a JSON, continue to regex fallback
     }
 
     // 2. Try to parse as key-value pairs (e.g., "SN:123, MAC:ABC")
@@ -40,6 +51,9 @@ export const parseScanData = (data: string): ParsedScanResult => {
             } else if (key.includes('mac')) {
                 result.macAddress = value.replace(/[:-]/g, '').toUpperCase();
                 foundKeyValue = true;
+            } else if (key.includes('id') || key.includes('asset')) {
+                result.id = value;
+                foundKeyValue = true;
             }
         }
     }
@@ -47,7 +61,7 @@ export const parseScanData = (data: string): ParsedScanResult => {
         return result;
     }
     
-    // 3. If not key-value, identify the raw string's format
+    // 3. Raw String Identification
     if (ASSET_ID_REGEX.test(raw)) {
         result.id = raw;
         return result;

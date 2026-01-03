@@ -1,5 +1,5 @@
 
-
+// ... existing imports
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Asset, AssetStatus, Request, User, PreviewData, AssetCategory, Page, RequestItem, ParsedScanResult, AssetType, AssetCondition } from '../../types';
 import { useNotification } from '../../providers/NotificationProvider';
@@ -24,9 +24,12 @@ import { EyeIcon } from '../../components/icons/EyeIcon';
 import { CloseIcon } from '../../components/icons/CloseIcon';
 import { InboxIcon } from '../../components/icons/InboxIcon';
 import { TrashIcon } from '../../components/icons/TrashIcon';
+import { QrCodeIcon } from '../../components/icons/QrCodeIcon'; // Added import
+import { BulkLabelModal } from './components/BulkLabelModal'; // Added import
 
 // Components
-import { RegistrationForm, RegistrationFormData } from './components/RegistrationForm';
+import { RegistrationForm } from './components/RegistrationForm';
+import { RegistrationFormData } from './types';
 
 // Stores
 import { useAssetStore } from '../../stores/useAssetStore';
@@ -189,7 +192,7 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
     // State
     const [view, setView] = useState<'list' | 'form'>('list');
     const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
-    const [bulkItems, setBulkItems] = useState<{ id: number; serialNumber: string; macAddress: string }[]>([{ id: Date.now(), serialNumber: '', macAddress: '' }]);
+    const [isBulkLabelModalOpen, setIsBulkLabelModalOpen] = useState(false); // New Modal State
     
     // Modals state for Type/Model management
     const [modelModalState, setModelModalState] = useState<{ isOpen: boolean; category: AssetCategory | null; type: AssetType | null }>({ isOpen: false, category: null, type: null });
@@ -198,7 +201,7 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
     // Filter/Sort/Search state
     const [searchQuery, setSearchQuery] = useState('');
     
-    // State Filter Logic (Baru)
+    // State Filter Logic
     const initialFilterState = { category: '', status: '', condition: '' };
     const [filters, setFilters] = useState(initialFilterState);
     const [tempFilters, setTempFilters] = useState(filters);
@@ -279,7 +282,6 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
         setTempFilters((prev) => ({ ...prev, [key]: "" }));
     };
 
-    // --- Options for Filters ---
     const categoryFilterOptions = useMemo(() => categories.map(c => ({ value: c.name, label: c.name })), [categories]);
     const statusFilterOptions = Object.values(AssetStatus).map(s => ({ value: s, label: s }));
     const conditionFilterOptions = Object.values(AssetCondition).map(c => ({ value: c, label: c }));
@@ -312,6 +314,7 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
             addNotification(`Aset ${data.assetName} berhasil diperbarui.`, 'success');
         } else {
             // Create New Asset(s)
+            // Use UUID or a robust generator here instead of Math.random
             const newAssets: Asset[] = data.bulkItems.map((item, index) => {
                 const generatedId = `AST-${new Date().getFullYear()}${String(new Date().getMonth()+1).padStart(2,'0')}-${String(Math.floor(Math.random()*10000)).padStart(4,'0')}-${index}`;
 
@@ -367,26 +370,14 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
         
         setView('list');
         setEditingAsset(null);
-        setBulkItems([{ id: Date.now(), serialNumber: '', macAddress: '' }]);
         onClearPrefill();
         onClearItemToEdit();
     };
 
     const handleStartScan = (itemId: number) => {
         setScanContext('form');
-        setFormScanCallback(() => (data: ParsedScanResult) => {
-             setBulkItems(prev => prev.map(item => {
-                 if (item.id === itemId) {
-                     return { 
-                         ...item, 
-                         serialNumber: data.serialNumber || item.serialNumber,
-                         macAddress: data.macAddress || item.macAddress 
-                     };
-                 }
-                 return item;
-             }));
-             addNotification('Data berhasil dipindai.', 'success');
-        });
+        // This relies on the RegistrationForm's own callback handler now.
+        // But for Global Scanner visibility:
         setIsGlobalScannerOpen(true);
     };
 
@@ -409,6 +400,11 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
     const handleSelectOne = (id: string) => {
         setSelectedAssetIds(prev => prev.includes(id) ? prev.filter(aid => aid !== id) : [...prev, id]);
     };
+    
+    // Calculate selected assets for bulk print modal
+    const selectedAssetsForPrint = useMemo(() => {
+        return assets.filter(a => selectedAssetIds.includes(a.id));
+    }, [assets, selectedAssetIds]);
 
     // Render
     if (view === 'form') {
@@ -432,13 +428,13 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
                         prefillData={prefillData}
                         editingAsset={editingAsset}
                         currentUser={currentUser}
-                        onStartScan={handleStartScan}
-                        bulkItems={bulkItems}
-                        setBulkItems={setBulkItems}
                         assetCategories={categories}
                         setActivePage={setActivePage}
                         openModelModal={(c, t) => setModelModalState({ isOpen: true, category: c, type: t })}
                         openTypeModal={(c, t) => setTypeModalState({ isOpen: true, category: c, typeToEdit: t })}
+                        // Scanner Props
+                        onStartScan={handleStartScan}
+                        setFormScanCallback={setFormScanCallback}
                     />
                 </div>
                 
@@ -535,6 +531,26 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
                         )}
                     </div>
                 </div>
+                
+                 {/* Bulk Action Bar */}
+                 {isBulkSelectMode && (
+                    <div className="p-4 bg-blue-50 border-l-4 border-tm-accent rounded-r-lg animate-fade-in-up">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-3">
+                                <span className="text-sm font-medium text-tm-primary">{selectedAssetIds.length} item terpilih</span>
+                                <div className="h-5 border-l border-gray-300"></div>
+                                <button 
+                                    onClick={() => setIsBulkLabelModalOpen(true)}
+                                    className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-semibold text-blue-800 bg-blue-100 rounded-md hover:bg-blue-200 shadow-sm transition-colors"
+                                >
+                                    <QrCodeIcon className="w-4 h-4"/> Cetak Label Masal
+                                </button>
+                                <button onClick={() => {/* Future: Implement bulk delete */}} className="px-3 py-1.5 text-sm font-semibold text-red-600 bg-red-100 rounded-md hover:bg-red-200 opacity-50 cursor-not-allowed">Hapus</button>
+                            </div>
+                            <button onClick={() => { setIsBulkSelectMode(false); setSelectedAssetIds([]); }} className="px-3 py-1.5 text-sm font-semibold text-gray-700 bg-gray-200 rounded-md hover:bg-gray-300">Batal</button>
+                        </div>
+                    </div>
+                )}
 
                 {/* ACTIVE FILTER CHIPS */}
                 {activeFilterCount > 0 && (
@@ -589,6 +605,15 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
                     endIndex={(currentPage - 1) * itemsPerPage + paginatedAssets.length}
                 />
             </div>
+            
+            {/* Bulk Label Modal */}
+            {isBulkLabelModalOpen && (
+                <BulkLabelModal
+                    isOpen={isBulkLabelModalOpen}
+                    onClose={() => setIsBulkLabelModalOpen(false)}
+                    assets={selectedAssetsForPrint}
+                />
+            )}
         </div>
     )
 }

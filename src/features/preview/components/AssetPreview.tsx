@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Asset, AssetStatus, PreviewData } from '../../../types';
 import { ClickableLink } from '../../../components/ui/ClickableLink';
 import { RegisterIcon } from '../../../components/icons/RegisterIcon';
@@ -16,9 +16,14 @@ import { CopyIcon } from '../../../components/icons/CopyIcon';
 import { EyeIcon } from '../../../components/icons/EyeIcon';
 import { DownloadIcon } from '../../../components/icons/DownloadIcon';
 import { DollarIcon } from '../../../components/icons/DollarIcon';
+import { PrintIcon } from '../../../components/icons/PrintIcon'; 
 import { getAssetStatusClass } from '../../../utils/statusUtils';
 import { calculateAssetDepreciation } from '../../../utils/depreciation';
 import { PreviewRow } from './PreviewRow';
+import { useNotification } from '../../../providers/NotificationProvider'; 
+import { AssetLabel } from '../../../components/ui/AssetLabel'; // Imported reusable component
+
+declare var html2canvas: any;
 
 // --- Sub-Components ---
 
@@ -100,6 +105,72 @@ const DepreciationCard: React.FC<{ asset: Asset }> = ({ asset }) => {
                     Aset telah habis masa manfaat ekonomisnya
                 </div>
             )}
+        </div>
+    );
+};
+
+// --- Asset Label Card Wrapper ---
+const AssetLabelCard: React.FC<{ asset: Asset }> = ({ asset }) => {
+    const labelRef = useRef<HTMLDivElement>(null);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const addNotification = useNotification();
+
+    const handleDownloadLabel = async () => {
+        if (!labelRef.current || typeof html2canvas === 'undefined') {
+            addNotification('Library visualisasi belum siap.', 'error');
+            return;
+        }
+
+        setIsProcessing(true);
+        try {
+            const canvas = await html2canvas(labelRef.current, {
+                scale: 3, 
+                useCORS: true,
+                backgroundColor: '#ffffff'
+            });
+            
+            const image = canvas.toDataURL("image/png");
+            const link = document.createElement("a");
+            link.href = image;
+            link.download = `LABEL_${asset.id}.png`;
+            link.click();
+            addNotification('Label aset berhasil diunduh.', 'success');
+        } catch (error) {
+            console.error(error);
+            addNotification('Gagal membuat gambar label.', 'error');
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
+    return (
+        <div className="mt-8 border-t pt-6 bg-gray-50/50 rounded-xl p-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4">
+                 <div>
+                    <h3 className="text-base font-bold text-gray-800">Label Aset Digital</h3>
+                    <p className="text-xs text-gray-500">Gunakan untuk identifikasi fisik aset.</p>
+                 </div>
+                 <div className="flex gap-2 mt-2 sm:mt-0 no-print">
+                     <button 
+                        onClick={handleDownloadLabel} 
+                        disabled={isProcessing}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50 disabled:opacity-50 transition-all"
+                    >
+                        {isProcessing ? <SpinnerIcon className="w-3.5 h-3.5" /> : <DownloadIcon className="w-3.5 h-3.5" />}
+                        Unduh PNG
+                     </button>
+                 </div>
+            </div>
+            
+            <div className="flex justify-center p-4 bg-gray-200/50 rounded-xl border border-gray-200 border-dashed">
+                {/* Use the new Reusable Component, wrapped in a div for ref capture */}
+                <div ref={labelRef}>
+                    <AssetLabel asset={asset} />
+                </div>
+            </div>
+            <p className="text-center text-[10px] text-gray-400 mt-2 no-print">
+                Tips: Gunakan kertas stiker label ukuran 70mm x 40mm atau cetak pada kertas A4 lalu gunting.
+            </p>
         </div>
     );
 };
@@ -202,6 +273,9 @@ export const AssetPreview: React.FC<AssetPreviewProps> = ({ asset, canViewPrice,
                                 <PreviewRow label="Catatan" value={asset.notes} fullWidth />
                             </dl>
                         </div>
+                        
+                        {/* New Asset Label Section */}
+                        <AssetLabelCard asset={asset} />
                     </div>
                 )}
                 {activeTab === 'history' && (
