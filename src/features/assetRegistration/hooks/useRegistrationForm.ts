@@ -31,6 +31,8 @@ export const useRegistrationForm = ({
         category: '',
         type: '',
         brand: '',
+        requestDescription: '',
+        relatedRequestDocNumber: '', // Init Empty
         purchasePrice: null, // Nullable untuk payload bersih
         vendor: '',
         poNumber: '',
@@ -116,7 +118,9 @@ export const useRegistrationForm = ({
                 category: foundCategory?.name || '',
                 type: foundType?.name || '',
                 brand: itemToRegister.itemTypeBrand,
-                notes: `Pencatatan dari request ${request.id}: ${itemToRegister.keterangan}`,
+                requestDescription: itemToRegister.keterangan || '', // Map keterangan request
+                relatedRequestDocNumber: request.docNumber || request.id, // Map No Dokumen Request
+                notes: '', // Reset notes agar user bisa isi manual, atau biarkan kosong
                 currentUser: null, // Reset assignee, masuk gudang dulu
                 quantity: quantityToRegister,
                 bulkItems: initialBulkItems,
@@ -145,13 +149,15 @@ export const useRegistrationForm = ({
                 category: editingAsset.category,
                 type: editingAsset.type,
                 brand: editingAsset.brand,
+                requestDescription: '', 
+                relatedRequestDocNumber: editingAsset.woRoIntNumber || '', // Tampilkan referensi dokumen jika ada
                 purchasePrice: editingAsset.purchasePrice ?? null,
                 vendor: editingAsset.vendor ?? '',
                 poNumber: editingAsset.poNumber ?? '',
                 invoiceNumber: editingAsset.invoiceNumber ?? '',
                 purchaseDate: editingAsset.purchaseDate ? new Date(editingAsset.purchaseDate).toISOString().split('T')[0] : '',
                 registrationDate: new Date(editingAsset.registrationDate).toISOString().split('T')[0],
-                recordedBy: currentUser.name, // Record editor name? Or keep original? Usually keep original creator, but new log entry.
+                recordedBy: currentUser.name, 
                 warrantyEndDate: editingAsset.warrantyEndDate || null,
                 condition: editingAsset.condition,
                 location: editingAsset.location ?? '',

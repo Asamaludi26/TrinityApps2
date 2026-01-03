@@ -108,14 +108,27 @@ export const IdentitySection: React.FC<IdentitySectionProps> = ({
                 placeholder="Pilih model atau ketik manual..."
             />
         </div>
-        <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700">Brand</label>
-            <input 
-                type="text" 
-                value={formData.brand} 
-                onChange={(e) => updateField('brand', e.target.value)}
-                className="block w-full px-3 py-2 mt-1 text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm sm:text-sm focus:ring-tm-primary focus:border-tm-primary" 
-            />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:col-span-2">
+            <div>
+                <label className="block text-sm font-medium text-gray-700">Brand</label>
+                <input 
+                    type="text" 
+                    value={formData.brand} 
+                    onChange={(e) => updateField('brand', e.target.value)}
+                    className="block w-full px-3 py-2 mt-1 text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm sm:text-sm focus:ring-tm-primary focus:border-tm-primary" 
+                />
+            </div>
+            {formData.requestDescription && (
+                <div>
+                    <label className="block text-sm font-medium text-gray-700">Keterangan (Dari Request)</label>
+                    <input 
+                        type="text" 
+                        value={formData.requestDescription} 
+                        readOnly
+                        className="block w-full px-3 py-2 mt-1 text-gray-700 bg-gray-100 border border-gray-200 rounded-md shadow-sm sm:text-sm cursor-not-allowed" 
+                    />
+                </div>
+            )}
         </div>
     </FormSection>
 );
@@ -134,18 +147,34 @@ export const FinancialSection: React.FC<FinancialSectionProps> = ({
 }) => {
     if (!canViewPrice) return null;
 
+    const totalPrice = (Number(formData.purchasePrice) || 0) * (Number(formData.quantity) || 0);
+
     return (
         <FormSection title="Informasi Pembelian" icon={<DollarIcon className="w-6 h-6 mr-3 text-tm-primary" />}>
-            <div>
-                <label className="block text-sm font-medium text-gray-700">Harga Beli (Rp)</label>
-                <input 
-                    type="number" 
-                    value={formData.purchasePrice ?? ''} 
-                    onChange={e => updateField('purchasePrice', e.target.value === '' ? null : parseFloat(e.target.value))} 
-                    disabled={disabled} 
-                    min="0"
-                    className="block w-full px-3 py-2 mt-1 text-gray-900 bg-gray-50 border border-gray-300 rounded-md shadow-sm sm:text-sm disabled:bg-gray-100" 
-                />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:col-span-2">
+                <div>
+                    <label className="block text-sm font-medium text-gray-700">Harga Satuan (Rp)</label>
+                    <input 
+                        type="number" 
+                        value={formData.purchasePrice ?? ''} 
+                        onChange={e => updateField('purchasePrice', e.target.value === '' ? null : parseFloat(e.target.value))} 
+                        disabled={disabled} 
+                        min="0"
+                        className="block w-full px-3 py-2 mt-1 text-gray-900 bg-gray-50 border border-gray-300 rounded-md shadow-sm sm:text-sm disabled:bg-gray-100" 
+                    />
+                </div>
+                 <div>
+                    <label className="block text-sm font-medium text-gray-700">Total Harga (Estimasi)</label>
+                    <div className="relative mt-1 rounded-md shadow-sm">
+                        <input 
+                            type="text" 
+                            value={`Rp ${totalPrice.toLocaleString('id-ID')}`} 
+                            readOnly
+                            className="block w-full px-3 py-2 text-gray-600 bg-gray-100 border border-gray-200 rounded-md sm:text-sm font-semibold" 
+                        />
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">Dihitung dari {formData.quantity || 0} unit.</p>
+                </div>
             </div>
             <div><label className="block text-sm font-medium text-gray-700">Vendor / Toko</label><input type="text" value={formData.vendor || ''} onChange={e => updateField('vendor', e.target.value)} disabled={disabled} className="block w-full px-3 py-2 mt-1 text-gray-900 bg-gray-50 border border-gray-300 rounded-md shadow-sm sm:text-sm disabled:bg-gray-100" /></div>
             <div><label className="block text-sm font-medium text-gray-700">Nomor PO</label><input type="text" value={formData.poNumber || ''} onChange={e => updateField('poNumber', e.target.value)} disabled={disabled} className="block w-full px-3 py-2 mt-1 text-gray-900 bg-gray-50 border border-gray-300 rounded-md shadow-sm sm:text-sm disabled:bg-gray-100" /></div>

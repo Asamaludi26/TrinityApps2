@@ -121,10 +121,25 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = (props) => {
                 </div>
 
                 <div className="p-4 border-t border-b border-gray-200">
-                    <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-                        <div><label className="block text-sm font-medium text-gray-700">Tanggal Pencatatan</label><DatePicker id="regDate" selectedDate={new Date(formData.registrationDate)} onDateChange={d => updateField('registrationDate', d?.toISOString().split('T')[0])} disableFutureDates /></div>
-                        <div><label className="block text-sm font-medium text-gray-700">Dicatat oleh</label><input type="text" readOnly className="block w-full px-3 py-2 mt-1 text-gray-700 bg-gray-100 border border-gray-200 rounded-md shadow-sm sm:text-sm" value={currentUser.name} /></div>
-                        <div><label className="block text-sm font-medium text-gray-700">No Dokumen</label><input type="text" readOnly className="block w-full px-3 py-2 mt-1 text-gray-700 bg-gray-100 border border-gray-200 rounded-md shadow-sm sm:text-sm" value={editingAsset?.id || '[Otomatis]'} /></div>
+                    <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Tanggal Pencatatan</label>
+                            <DatePicker id="regDate" selectedDate={new Date(formData.registrationDate)} onDateChange={d => updateField('registrationDate', d?.toISOString().split('T')[0])} disableFutureDates />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Dicatat oleh</label>
+                            <input type="text" readOnly className="block w-full px-3 py-2 mt-1 text-gray-700 bg-gray-100 border border-gray-200 rounded-md shadow-sm sm:text-sm" value={currentUser.name} />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">No Dokumen Aset</label>
+                            <input type="text" readOnly className="block w-full px-3 py-2 mt-1 text-gray-700 bg-gray-100 border border-gray-200 rounded-md shadow-sm sm:text-sm" value={editingAsset?.id || '[Otomatis]'} />
+                        </div>
+                        {formData.relatedRequestDocNumber && (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">No. Request (Sumber)</label>
+                                <input type="text" readOnly className="block w-full px-3 py-2 mt-1 text-blue-800 bg-blue-50 border border-blue-200 rounded-md shadow-sm sm:text-sm font-mono" value={formData.relatedRequestDocNumber} />
+                            </div>
+                        )}
                     </div>
                 </div>
 

@@ -10,6 +10,11 @@ export interface RegistrationFormData {
     type: string;     // Tetap disimpan untuk UI display / fallback
     
     brand: string;
+    requestDescription?: string; 
+    
+    // Field baru untuk menampilkan nomor dokumen request di header
+    relatedRequestDocNumber?: string | null; 
+    
     purchasePrice: number | null;
     vendor: string | null;
     poNumber: string | null;
