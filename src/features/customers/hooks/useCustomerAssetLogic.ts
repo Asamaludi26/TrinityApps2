@@ -1,17 +1,27 @@
 
 import { useMemo, useCallback } from 'react';
 import { useAssetStore } from '../../../stores/useAssetStore';
+import { useAuthStore } from '../../../stores/useAuthStore'; // NEW: Need auth to check custody
 import { AssetStatus, Asset } from '../../../types';
 
 export const useCustomerAssetLogic = () => {
     const assets = useAssetStore((state) => state.assets);
     const categories = useAssetStore((state) => state.categories);
+    const currentUser = useAuthStore((state) => state.currentUser); // Get current technician
 
     // 1. Get Assets Available for Installation (Devices)
-    // Syarat: Status = IN_STORAGE, Kategori = isCustomerInstallable, Tracking = Individual
+    // Syarat REVISI: 
+    // - Status = IN_STORAGE (Ambil dari gudang) 
+    // - ATAU Status = IN_CUSTODY (Dipegang Teknisi yang sedang login)
+    // - Kategori = isCustomerInstallable
+    // - Tracking = Individual
     const installableAssets = useMemo(() => {
         return assets.filter(asset => {
-            if (asset.status !== AssetStatus.IN_STORAGE) return false;
+            // Check Eligibility Status
+            const isAvailableInStorage = asset.status === AssetStatus.IN_STORAGE;
+            const isHeldByTechnician = asset.status === AssetStatus.IN_CUSTODY && asset.currentUser === currentUser?.name;
+            
+            if (!isAvailableInStorage && !isHeldByTechnician) return false;
             
             const category = categories.find(c => c.name === asset.category);
             if (!category?.isCustomerInstallable) return false;
@@ -20,10 +30,11 @@ export const useCustomerAssetLogic = () => {
             return type?.trackingMethod !== 'bulk'; // Exclude materials
         }).map(asset => ({
             value: asset.id,
-            label: `${asset.name} (${asset.id}) - SN: ${asset.serialNumber || 'N/A'}`,
+            // Enhance Label to show source
+            label: `${asset.name} (${asset.id}) ${asset.status === AssetStatus.IN_CUSTODY ? '[Pegangan Anda]' : ''}`,
             original: asset
         }));
-    }, [assets, categories]);
+    }, [assets, categories, currentUser]);
 
     // 2. Get Available Materials (Bulk Items)
     // Syarat: Kategori = isCustomerInstallable, Tracking = Bulk
@@ -74,22 +85,22 @@ export const useCustomerAssetLogic = () => {
     }, [assets]);
 
     // 4. Get Replacement Candidates (Smart Logic)
-    // Mencari aset di gudang yang Tipe & Brand-nya SAMA dengan aset yang rusak/diganti
+    // Mencari aset di gudang ATAU dipegang teknisi (Custody) yang Tipe & Brand-nya SAMA
     const getReplacementOptions = useCallback((assetToReplaceId: string, currentSelections: string[] = []) => {
         const oldAsset = assets.find(a => a.id === assetToReplaceId);
         if (!oldAsset) return [];
 
         return assets.filter(a => 
-            a.status === AssetStatus.IN_STORAGE &&
+            (a.status === AssetStatus.IN_STORAGE || (a.status === AssetStatus.IN_CUSTODY && a.currentUser === currentUser?.name)) &&
             a.name === oldAsset.name &&
             a.brand === oldAsset.brand &&
             a.id !== oldAsset.id &&
             !currentSelections.includes(a.id) // Exclude already selected replacements
         ).map(a => ({
             value: a.id,
-            label: `${a.id} (SN: ${a.serialNumber || 'N/A'})`
+            label: `${a.id} ${a.status === AssetStatus.IN_CUSTODY ? '[Pegangan Anda]' : ''} (SN: ${a.serialNumber || 'N/A'})`
         }));
-    }, [assets]);
+    }, [assets, currentUser]);
 
     return {
         assets, // Raw assets if needed

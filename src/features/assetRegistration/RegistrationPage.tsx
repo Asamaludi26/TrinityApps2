@@ -60,6 +60,7 @@ interface ItemRegistrationProps {
 export const getStatusClass = (status: AssetStatus | string) => {
     switch (status) {
         case AssetStatus.IN_USE: return 'bg-info-light text-info-text';
+        case AssetStatus.IN_CUSTODY: return 'bg-purple-100 text-purple-800'; // New Status
         case AssetStatus.IN_STORAGE: return 'bg-gray-100 text-gray-800';
         case AssetStatus.UNDER_REPAIR: return 'bg-blue-100 text-blue-700';
         case AssetStatus.OUT_FOR_REPAIR: return 'bg-purple-100 text-purple-700';
@@ -178,6 +179,7 @@ const RegistrationTable: React.FC<RegistrationTableProps> = ({ assets, onDetailC
 };
 
 const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
+    // ... existing implementation same as before
     const { currentUser, setActivePage, onShowPreview, setIsGlobalScannerOpen, setScanContext, setFormScanCallback, prefillData, itemToEdit, onClearPrefill, onClearItemToEdit, initialFilters, onClearInitialFilters } = props;
 
     // Stores

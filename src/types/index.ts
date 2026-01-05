@@ -96,6 +96,7 @@ export interface LoginResponse {
 export enum AssetStatus {
   IN_STORAGE = 'Di Gudang',
   IN_USE = 'Digunakan',
+  IN_CUSTODY = 'Dipegang (Custody)', // New Status
   UNDER_REPAIR = 'Dalam Perbaikan',
   OUT_FOR_REPAIR = 'Keluar (Service)',
   DAMAGED = 'Rusak',
@@ -255,7 +256,7 @@ export interface AssetCategory {
 export interface Division {
     id: number;
     name: string;
-}
+    }
 
 export interface InstalledMaterial {
     itemName: string;

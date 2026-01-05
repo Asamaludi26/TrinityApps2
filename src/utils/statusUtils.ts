@@ -4,6 +4,7 @@ import { AssetStatus, CustomerStatus, ItemStatus } from '../types';
 export const getAssetStatusClass = (status: AssetStatus | string) => {
     switch (status) {
         case AssetStatus.IN_USE: return 'bg-info-light text-info-text';
+        case AssetStatus.IN_CUSTODY: return 'bg-purple-100 text-purple-800 border border-purple-200'; // New Style
         case AssetStatus.IN_STORAGE: return 'bg-gray-100 text-gray-800';
         case AssetStatus.UNDER_REPAIR: return 'bg-blue-100 text-blue-700';
         case AssetStatus.OUT_FOR_REPAIR: return 'bg-purple-100 text-purple-700';

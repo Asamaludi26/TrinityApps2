@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Handover, ItemStatus, Asset, User, PreviewData, Request, LoanRequest, LoanRequestStatus, AssetStatus } from '../../types';
 import { useNotification } from '../../providers/NotificationProvider';
@@ -39,8 +40,8 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
     const addHandover = useTransactionStore(state => state.addHandover);
     const deleteHandover = useTransactionStore(state => state.deleteHandover);
     
-    const updateAsset = useAssetStore(state => state.updateAsset);
-    const assets = useAssetStore(state => state.assets); // Need assets for validation logic
+    const updateAssetBatch = useAssetStore(state => state.updateAssetBatch);
+    // Kita tidak mengambil assets dari hook state langsung untuk logic save, tapi via getState() nanti
     const users = useMasterDataStore(state => state.users);
     const divisions = useMasterDataStore(state => state.divisions);
     const storeUser = useAuthStore(state => state.currentUser);
@@ -118,27 +119,32 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
             // 1. Create Handover Document
             await addHandover(newHandover);
 
-            // 2. Update Assets Status & Location
-            const assetIdsInHandover: string[] = [];
-            const assetUpdatePromises = data.items.map(item => {
-                if (item.assetId) {
-                    assetIdsInHandover.push(item.assetId);
-                    return updateAsset(item.assetId, {
-                        status: targetStatus,
-                        currentUser: targetStatus === AssetStatus.IN_STORAGE ? null : data.penerima,
-                        location: targetStatus === AssetStatus.IN_STORAGE ? 'Gudang Inventori' : `Digunakan oleh ${data.penerima}`,
-                        // Backend should append activity log here automatically
-                    });
-                }
-                return Promise.resolve();
-            });
-            await Promise.all(assetUpdatePromises);
+            // 2. Update Assets Status & Location (BATCH UPDATE)
+            const assetIdsInHandover = data.items
+                .map(item => item.assetId)
+                .filter((id): id is string => !!id);
+
+            if (assetIdsInHandover.length > 0) {
+                // LOGIC UPDATE: Mendukung IN_CUSTODY atau IN_USE
+                const locationText = targetStatus === AssetStatus.IN_STORAGE 
+                    ? 'Gudang Inventori' 
+                    : targetStatus === AssetStatus.IN_CUSTODY
+                        ? `Dipegang oleh ${data.penerima} (Custody)`
+                        : `Digunakan oleh ${data.penerima}`;
+
+                await updateAssetBatch(assetIdsInHandover, {
+                    status: targetStatus,
+                    currentUser: targetStatus === AssetStatus.IN_STORAGE ? null : data.penerima,
+                    location: locationText,
+                }, 'Serah Terima (Handover)');
+            }
             
             // 3. Update Source Document Status (Request / Loan)
             if (newHandover.woRoIntNumber) {
                 // A. Handle Loan Request (Prefix: RL or LREQ)
                 if (newHandover.woRoIntNumber.startsWith('RL-') || newHandover.woRoIntNumber.startsWith('LREQ-')) {
-                    if (targetStatus === AssetStatus.IN_USE) {
+                    // Loan dianggap aktif jika aset keluar (baik USE maupun CUSTODY)
+                    if (targetStatus === AssetStatus.IN_USE || targetStatus === AssetStatus.IN_CUSTODY) {
                          await updateLoanRequest(newHandover.woRoIntNumber, {
                             status: LoanRequestStatus.ON_LOAN,
                             handoverId: newHandover.id,
@@ -147,19 +153,22 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
                 } 
                 // B. Handle New Asset Request (Prefix: RO or REQ)
                 else if (newHandover.woRoIntNumber.startsWith('RO-') || newHandover.woRoIntNumber.startsWith('REQ-')) {
-                     // LOGIC PERBAIKAN: Cek apakah masih ada aset tersisa di gudang untuk request ini?
-                     // Jika sisa = 0, barulah status Request = COMPLETED.
-                     // Jika sisa > 0, status tetap AWAITING_HANDOVER (Partial Handover).
+                     // LOGIC PERBAIKAN: Fetch fresh state using getState() to guarantee latest data
+                     const freshAssets = useAssetStore.getState().assets;
                      
                      // Ambil semua aset yang terdaftar untuk request ini
-                     const allAssetsForRequest = assets.filter(a => a.woRoIntNumber === newHandover.woRoIntNumber);
+                     const allAssetsForRequest = freshAssets.filter(a => a.woRoIntNumber === newHandover.woRoIntNumber);
                      
-                     // Hitung aset yang statusnya MASIH 'IN_STORAGE' (Belum diserahkan)
-                     // Kita perlu mengecualikan aset yang BARU SAJA kita update di langkah (2) di atas
-                     // karena state 'assets' mungkin belum refresh sepenuhnya di closure ini.
+                     // CRITICAL FIX: 
+                     // Request dianggap selesai jika aset SUDAH TIDAK di gudang.
+                     // Artinya: Status != IN_STORAGE. 
+                     // (IN_USE = Selesai, IN_CUSTODY = Selesai/Diantar, DAMAGED = Selesai/Issue lain)
+                     // Kita kecualikan assetIdsInHandover dari pengecekan ini karena store mungkin belum update saat baris ini jalan,
+                     // tapi kita tahu mereka baru saja diubah statusnya menjadi targetStatus (yang bukan IN_STORAGE).
                      
                      const remainingInStorage = allAssetsForRequest.filter(a => 
-                         a.status === AssetStatus.IN_STORAGE && !assetIdsInHandover.includes(a.id)
+                         !assetIdsInHandover.includes(a.id) && // Kecualikan yang baru saja di-handover
+                         a.status === AssetStatus.IN_STORAGE
                      );
 
                      if (remainingInStorage.length === 0) {
@@ -178,10 +187,6 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
                                 }
                              ]
                          });
-                     } else {
-                         // Partial Handover - Log activity only
-                         // Request status stays 'AWAITING_HANDOVER'
-                         // Backend would ideally handle activity log appending
                      }
                 }
             }
@@ -282,7 +287,6 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
                         onEnterBulkMode={() => setIsBulkSelectMode(true)}
                     />
                 </div>
-                {/* Simplified Pagination for brevity - reuse component */}
             </div>
         </div>
     );

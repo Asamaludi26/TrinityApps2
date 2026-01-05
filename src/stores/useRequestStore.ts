@@ -1,13 +1,12 @@
+
 import { create } from 'zustand';
-import { Request, LoanRequest, AssetReturn, ItemStatus, LoanRequestStatus, AssetReturnStatus, RequestItem, AssetStatus, Handover, AssetCondition } from '../types';
+import { Request, LoanRequest, AssetReturn, ItemStatus, LoanRequestStatus, AssetReturnStatus, AssetStatus, AssetCondition } from '../types';
 import * as api from '../services/api';
 import { useNotificationStore } from './useNotificationStore';
 import { useUIStore } from './useUIStore'; 
 import { useMasterDataStore } from './useMasterDataStore';
 import { useAssetStore } from './useAssetStore'; 
-import { useTransactionStore } from './useTransactionStore';
 import { generateDocumentNumber } from '../utils/documentNumberGenerator';
-import { WhatsAppService, sendWhatsAppSimulation, WAMessagePayload } from '../services/whatsappIntegration';
 import { useAuthStore } from './useAuthStore';
 
 interface RequestState {
@@ -27,7 +26,6 @@ interface RequestState {
   deleteLoanRequest: (id: string) => Promise<void>;
   approveLoanRequest: (id: string, payload: { approver: string, approvalDate: string, assignedAssetIds: any, itemStatuses: any }) => Promise<void>;
   
-  // Return Logic Refactored
   addReturn: (returnData: AssetReturn) => Promise<void>;
   updateReturn: (id: string, data: Partial<AssetReturn>) => Promise<void>;
   
@@ -35,9 +33,33 @@ interface RequestState {
   submitReturnRequest: (loanRequestId: string, returnItems: { assetId: string, condition: AssetCondition, notes: string }[]) => Promise<void>;
 }
 
-const triggerWAModal = (payload: WAMessagePayload) => {
-    useNotificationStore.getState().addToast('Pesan WhatsApp Dibuat', 'success', { duration: 2000 });
-    useUIStore.getState().openWAModal(payload);
+const sendSystemNotif = (recipientRoleOrName: string, type: string, refId: string, message: string, isRole = false) => {
+    const users = useMasterDataStore.getState().users;
+    const currentUser = useAuthStore.getState().currentUser;
+    const addNotif = useNotificationStore.getState().addSystemNotification;
+
+    if (!currentUser) return;
+
+    let recipients: typeof users = [];
+
+    if (isRole) {
+        recipients = users.filter(u => u.role === recipientRoleOrName || (recipientRoleOrName === 'Admin' && ['Admin Logistik', 'Admin Purchase', 'Super Admin'].includes(u.role)));
+    } else {
+        const user = users.find(u => u.name === recipientRoleOrName);
+        if (user) recipients = [user];
+    }
+
+    recipients.forEach(target => {
+        if (target.id !== currentUser.id) {
+            addNotif({
+                recipientId: target.id,
+                actorName: currentUser.name,
+                type: type,
+                referenceId: refId,
+                message: message
+            });
+        }
+    });
 };
 
 export const useRequestStore = create<RequestState>((set, get) => ({
@@ -64,34 +86,92 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   addRequest: async (requestData) => {
       const current = get().requests;
       const requestDate = new Date(requestData.requestDate);
-      
-      // Menggunakan generator dokumen untuk membuat ID dengan format RO-YYMMDD-NNNN
       const docsForGenerator = current.map(r => ({ docNumber: r.id }));
       const newId = generateDocumentNumber('RO', docsForGenerator, requestDate);
       
+      // LOGIKA CERDAS: Cek Stok Otomatis
+      const { checkAvailability } = useAssetStore.getState();
       const itemStatuses: Record<number, any> = {};
+      let allStockAvailable = true;
+
       requestData.items.forEach(item => {
-           itemStatuses[item.id] = { status: 'procurement_needed', approvedQuantity: item.quantity };
+           // Cek ketersediaan di Asset Store
+           const stockCheck = checkAvailability(item.itemName, item.itemTypeBrand, item.quantity);
+           
+           if (stockCheck.isSufficient) {
+               // Jika stok ada, langsung alokasikan secara sistem
+               itemStatuses[item.id] = { 
+                   status: 'stock_allocated', 
+                   approvedQuantity: item.quantity,
+                   reason: 'Stok tersedia di gudang (Auto-Allocated)' 
+               };
+           } else {
+               // Jika kurang, tandai butuh pengadaan
+               itemStatuses[item.id] = { 
+                   status: 'procurement_needed', 
+                   approvedQuantity: item.quantity 
+               };
+               allStockAvailable = false;
+           }
       });
+      
+      // Jika SEMUA item tersedia, bypass approval dan langsung ke status Siap Handover
+      // Kecuali jika ini request Project Based / Urgent yang mungkin butuh review khusus
+      const initialStatus = (allStockAvailable && requestData.order.type === 'Regular Stock') 
+          ? ItemStatus.AWAITING_HANDOVER 
+          : ItemStatus.PENDING;
       
       const newRequest: Request = {
         ...requestData,
         id: newId,
-        docNumber: newId, // ID Request sekaligus menjadi Nomor Dokumen
-        status: ItemStatus.PENDING,
+        docNumber: newId,
+        status: initialStatus,
         itemStatuses: itemStatuses,
+        // Jika auto-allocated, anggap sudah registered (karena barang sudah ada)
+        isRegistered: allStockAvailable && requestData.order.type === 'Regular Stock',
+        partiallyRegisteredItems: allStockAvailable ? 
+            requestData.items.reduce((acc, item) => ({...acc, [item.id]: item.quantity}), {}) : {}
       };
 
       const updated = [newRequest, ...current];
       await api.updateData('app_requests', updated);
       set({ requests: updated });
+
+      // Notifikasi Cerdas
+      if (initialStatus === ItemStatus.AWAITING_HANDOVER) {
+           sendSystemNotif('Admin Logistik', 'REQUEST_CREATED', newRequest.id, 'membuat request (Stok Tersedia, Siap Handover)', true);
+           // Info balik ke user
+           useNotificationStore.getState().addToast('Request dibuat. Stok tersedia, silakan hubungi Logistik untuk pengambilan.', 'success');
+      } else {
+           sendSystemNotif('Admin Logistik', 'REQUEST_CREATED', newRequest.id, 'membuat permintaan aset baru (Butuh Pengadaan/Review)', true);
+      }
+      sendSystemNotif('Super Admin', 'REQUEST_CREATED', newRequest.id, 'membuat permintaan aset baru', true);
   },
 
   updateRequest: async (id, data) => {
     const current = get().requests;
+    const oldRequest = current.find(r => r.id === id);
     const updated = current.map(r => r.id === id ? { ...r, ...data } : r);
     await api.updateData('app_requests', updated);
     set({ requests: updated });
+
+    if (oldRequest && data.status && oldRequest.status !== data.status) {
+        const requester = oldRequest.requester;
+        if (data.status === ItemStatus.LOGISTIC_APPROVED) {
+            sendSystemNotif('Admin Purchase', 'REQUEST_LOGISTIC_APPROVED', id, 'menyetujui tahap logistik, mohon proses pembelian', true);
+            sendSystemNotif(requester, 'STATUS_CHANGE', id, 'telah disetujui oleh Logistik', false);
+        } else if (data.status === ItemStatus.AWAITING_CEO_APPROVAL) {
+            sendSystemNotif('Super Admin', 'REQUEST_AWAITING_FINAL_APPROVAL', id, 'membutuhkan persetujuan final', true);
+        } else if (data.status === ItemStatus.APPROVED) {
+            sendSystemNotif('Admin Purchase', 'REQUEST_FULLY_APPROVED', id, 'telah disetujui final. Silakan proses PO', true);
+            sendSystemNotif(requester, 'REQUEST_APPROVED', id, 'telah disetujui sepenuhnya', false);
+        } else if (data.status === ItemStatus.REJECTED) {
+            sendSystemNotif(requester, 'REQUEST_REJECTED', id, `telah ditolak. Alasan: ${data.rejectionReason || '-'}` , false);
+        } else if (data.status === ItemStatus.ARRIVED) {
+            sendSystemNotif('Admin Logistik', 'STATUS_CHANGE', id, 'Barang telah tiba. Mohon catat aset.', true);
+             sendSystemNotif(requester, 'STATUS_CHANGE', id, 'Barang pesanan telah tiba di gudang', false);
+        }
+    }
   },
 
   deleteRequest: async (id) => {
@@ -107,32 +187,19 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     if (requestIndex === -1) return false;
 
     const request = currentRequests[requestIndex];
-    
-    // 1. Update counter partial registration
     const currentRegistered = request.partiallyRegisteredItems || {};
     const newCount = (currentRegistered[itemId] || 0) + count;
     const updatedRegistered = { ...currentRegistered, [itemId]: newCount };
 
-    // 2. Cek apakah seluruh item dalam request sudah terpenuhi (Selesai Dicatat)
-    // Logika: Semua item yang statusnya approved/partial dan > 0, harus memiliki registeredQty >= approvedQty
     let isFullyComplete = true;
-    
     request.items.forEach(item => {
         const status = request.itemStatuses?.[item.id];
-        // Skip item yang ditolak atau dialokasikan dari stok lama (tidak butuh registrasi baru)
         if (status?.status === 'rejected' || status?.status === 'stock_allocated') return;
-
         const approvedQty = status?.approvedQuantity ?? item.quantity;
         const regQty = updatedRegistered[item.id] || 0;
-
-        if (regQty < approvedQty) {
-            isFullyComplete = false;
-        }
+        if (regQty < approvedQty) isFullyComplete = false;
     });
 
-    // 3. Tentukan status selanjutnya
-    // Jika semua lengkap -> AWAITING_HANDOVER (Siap Serah Terima)
-    // Jika belum -> Tetap status lama (biasanya ARRIVED)
     const nextStatus = isFullyComplete ? ItemStatus.AWAITING_HANDOVER : request.status;
     const isRegisteredFlag = isFullyComplete; 
 
@@ -140,10 +207,9 @@ export const useRequestStore = create<RequestState>((set, get) => ({
         ...request,
         partiallyRegisteredItems: updatedRegistered,
         status: nextStatus,
-        isRegistered: isRegisteredFlag // Helper flag untuk UI
+        isRegistered: isRegisteredFlag 
     };
 
-    // 4. Jika status berubah jadi AWAITING_HANDOVER, tambahkan log aktivitas
     if (nextStatus === ItemStatus.AWAITING_HANDOVER && request.status !== ItemStatus.AWAITING_HANDOVER) {
          const activityLog = updatedRequest.activityLog || [];
          activityLog.unshift({
@@ -154,11 +220,11 @@ export const useRequestStore = create<RequestState>((set, get) => ({
              payload: { text: 'Seluruh item telah dicatat. Status diubah menjadi Siap Serah Terima.' }
          });
          updatedRequest.activityLog = activityLog;
+         sendSystemNotif(updatedRequest.requester, 'REQUEST_COMPLETED', requestId, 'Aset telah diregistrasi dan siap diserahterimakan', false);
     }
 
     const updatedRequests = [...currentRequests];
     updatedRequests[requestIndex] = updatedRequest;
-
     await api.updateData('app_requests', updatedRequests);
     set({ requests: updatedRequests });
     return true;
@@ -169,13 +235,23 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     const updated = [request, ...current];
     await api.updateData('app_loanRequests', updated);
     set({ loanRequests: updated });
+    sendSystemNotif('Admin Logistik', 'REQUEST_CREATED', request.id, 'membuat request pinjam aset', true);
   },
 
   updateLoanRequest: async (id, data) => {
     const current = get().loanRequests;
+    const oldReq = current.find(r => r.id === id);
     const updated = current.map(r => r.id === id ? { ...r, ...data } : r);
     await api.updateData('app_loanRequests', updated);
     set({ loanRequests: updated });
+    
+    if (oldReq && data.status && oldReq.status !== data.status) {
+        if (data.status === LoanRequestStatus.REJECTED) {
+             sendSystemNotif(oldReq.requester, 'REQUEST_REJECTED', id, 'Request pinjaman ditolak', false);
+        } else if (data.status === LoanRequestStatus.RETURNED) {
+             sendSystemNotif(oldReq.requester, 'STATUS_CHANGE', id, 'Pengembalian aset telah dikonfirmasi selesai', false);
+        }
+    }
   },
   
   approveLoanRequest: async (id, payload) => {
@@ -184,6 +260,11 @@ export const useRequestStore = create<RequestState>((set, get) => ({
      const updatedLoans = currentLoans.map(r => r.id === id ? updatedRequest : r);
      set({ loanRequests: updatedLoans });
      await useAssetStore.getState().fetchAssets();
+     
+     const loan = currentLoans.find(r => r.id === id);
+     if (loan) {
+         sendSystemNotif(loan.requester, 'REQUEST_APPROVED', id, 'Request pinjaman disetujui. Aset siap diambil', false);
+     }
   },
   
   deleteLoanRequest: async (id) => {
@@ -198,6 +279,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     const updated = [returnData, ...current];
     await api.updateData('app_returns', updated);
     set({ returns: updated });
+    sendSystemNotif('Admin Logistik', 'STATUS_CHANGE', returnData.docNumber, `mengajukan pengembalian aset (Ref: ${returnData.loanRequestId})`, true);
   },
   
   updateReturn: async (id, data) => {
@@ -206,30 +288,21 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     await api.updateData('app_returns', updated);
     set({ returns: updated });
   },
-  
-  // --- REFACTORED LOGIC FOR RETURNS (CRITICAL FIX) ---
 
   submitReturnRequest: async (loanRequestId, returnItems) => {
       const { currentUser } = useAuthStore.getState();
       const { assets, updateAssetBatch } = useAssetStore.getState();
-      const { users } = useMasterDataStore.getState();
-      const { addSystemNotification } = useNotificationStore.getState();
       const { addReturn, updateLoanRequest, returns, loanRequests } = get();
 
       const loanRequest = loanRequests.find(lr => lr.id === loanRequestId);
-
-      if (!loanRequest || !currentUser) {
-          throw new Error("Request atau pengguna tidak ditemukan.");
-      }
+      if (!loanRequest || !currentUser) throw new Error("Request atau pengguna tidak ditemukan.");
       
       const today = new Date();
-      // Update: Gunakan format RR (Request Return)
       const returnDocNumber = generateDocumentNumber('RR', returns, today);
       const assetIds = returnItems.map(item => item.assetId);
 
-      // Create ONE return document containing all items
       const newReturnDoc: AssetReturn = {
-          id: returnDocNumber, // Gunakan ID yang sama dengan DocNumber
+          id: returnDocNumber,
           docNumber: returnDocNumber,
           returnDate: today.toISOString(),
           loanRequestId: loanRequest.id,
@@ -248,36 +321,20 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       };
 
       await addReturn(newReturnDoc);
-      
-      // Update Assets to Awaiting Return (Lock Status)
       await updateAssetBatch(assetIds, { status: AssetStatus.AWAITING_RETURN });
       
-      // Update Loan Request status -> AWAITING_RETURN
       if (loanRequest.status !== LoanRequestStatus.AWAITING_RETURN) {
         await updateLoanRequest(loanRequest.id, { status: LoanRequestStatus.AWAITING_RETURN });
       }
-
-      const logisticAdmins = users.filter(u => u.role === 'Admin Logistik' || u.role === 'Super Admin');
-      logisticAdmins.forEach(admin => {
-          addSystemNotification({
-              recipientId: admin.id,
-              actorName: currentUser.name,
-              type: 'STATUS_CHANGE',
-              referenceId: newReturnDoc.docNumber,
-              message: `mengajukan pengembalian untuk ${assetIds.length} item. Mohon verifikasi.`
-          });
-      });
 
       useUIStore.getState().setActivePage('request-pinjam', { initialTab: 'returns' });
       useUIStore.getState().setHighlightOnReturn(newReturnDoc.id);
   },
 
-  // CRITICAL FIX: Ensure ACID-like updates for Return Verification
   processReturnBatch: async (returnDocId, acceptedAssetIds, approverName) => {
     set({ isLoading: true });
     try {
         const now = new Date();
-        // 1. Fetch Fresh Data (Always use get() inside async action to get latest state)
         const currentReturns = get().returns;
         const currentLoanRequests = get().loanRequests;
         const { updateAsset, updateAssetBatch } = useAssetStore.getState();
@@ -289,37 +346,31 @@ export const useRequestStore = create<RequestState>((set, get) => ({
         const loanRequest = currentLoanRequests.find(r => r.id === returnDoc.loanRequestId);
         if (!loanRequest) throw new Error("Request pinjaman terkait tidak ditemukan.");
 
-        // 2. Update Items Status INSIDE the Return Document
-        // Ini menentukan status "Persetujuan" per item
         const updatedItems = returnDoc.items.map(item => {
             if (acceptedAssetIds.includes(item.assetId)) {
                 return { ...item, status: 'ACCEPTED' as const, verificationNotes: 'Diverifikasi OK' };
             } else {
-                // Item yang tidak dicentang dianggap REJECTED (Ditolak/Dikembalikan ke user)
                 return { ...item, status: 'REJECTED' as const, verificationNotes: 'Fisik tidak diterima/ditolak saat verifikasi.' };
             }
         });
 
-        // 3. Determine Final Status of Return Document
         const allAccepted = updatedItems.every(i => i.status === 'ACCEPTED');
         const allRejected = updatedItems.every(i => i.status === 'REJECTED');
         const finalDocStatus = allAccepted ? AssetReturnStatus.COMPLETED : 
                           allRejected ? AssetReturnStatus.REJECTED : 
-                          AssetReturnStatus.APPROVED; // Partial (Approved because some are accepted)
+                          AssetReturnStatus.APPROVED;
 
         const updatedReturnDoc: AssetReturn = {
             ...returnDoc,
             items: updatedItems,
-            status: finalDocStatus, // IMPORTANT: Updates status here to break the UI Loop
+            status: finalDocStatus,
             verifiedBy: approverName,
             verificationDate: now.toISOString()
         };
 
-        // 4. Update REAL Asset Statuses (Inventory)
         const acceptedItems = updatedItems.filter(i => i.status === 'ACCEPTED');
         const rejectedItems = updatedItems.filter(i => i.status === 'REJECTED');
 
-        // Accepted -> Masuk Gudang (IN_STORAGE) or Rusak (DAMAGED) based on condition
         for (const item of acceptedItems) {
             const isGood = [AssetCondition.GOOD, AssetCondition.USED_OKAY].includes(item.returnedCondition);
             const targetStatus = isGood ? AssetStatus.IN_STORAGE : AssetStatus.DAMAGED;
@@ -332,56 +383,31 @@ export const useRequestStore = create<RequestState>((set, get) => ({
             });
         }
 
-        // Rejected -> Kembali ke User (IN_USE)
         if (rejectedItems.length > 0) {
             await updateAssetBatch(rejectedItems.map(i => i.assetId), { status: AssetStatus.IN_USE });
         }
 
-        // 5. Update LOAN REQUEST Status (The Parent)
-        // Hitung total aset yang SUDAH kembali (kumulatif dari semua dokumen return sebelumnya + dokumen ini)
         const previouslyReturnedIds = loanRequest.returnedAssetIds || [];
-        const newReturnedIds = acceptedItems.map(i => i.assetId); // Only accepted ones count as returned
+        const newReturnedIds = acceptedItems.map(i => i.assetId);
         const finalReturnedIds = Array.from(new Set([...previouslyReturnedIds, ...newReturnedIds]));
-        
-        // Total aset yang dipinjam
         const allAssignedIds = Object.values(loanRequest.assignedAssetIds || {}).flat();
-        
-        // Cek apakah SEMUA aset yang dipinjam sudah ada di daftar returnedIds
         const isFullyReturned = allAssignedIds.length > 0 && allAssignedIds.every(id => finalReturnedIds.includes(id));
 
         const updatedLoanRequest: Partial<LoanRequest> = {
             returnedAssetIds: finalReturnedIds,
-            // Jika semua aset sudah kembali -> RETURNED. Jika belum -> ON_LOAN (karena sebagian masih dipegang user)
             status: isFullyReturned ? LoanRequestStatus.RETURNED : LoanRequestStatus.ON_LOAN,
             actualReturnDate: isFullyReturned ? now.toISOString() : loanRequest.actualReturnDate,
         };
         
-        // 6. COMMIT ALL CHANGES TO STORES
-        // Update Return Doc
         const newReturnsList = [...get().returns];
         newReturnsList[returnDocIndex] = updatedReturnDoc;
-        await api.updateData('app_returns', newReturnsList); // Persist Return Update
+        await api.updateData('app_returns', newReturnsList);
         
-        // Update Loan Request
-        await get().updateLoanRequest(loanRequest.id, updatedLoanRequest); // Persist Loan Update
-        
-        // Update local state to trigger UI updates immediately
+        await get().updateLoanRequest(loanRequest.id, updatedLoanRequest);
         set({ returns: newReturnsList, isLoading: false });
         
-        // Notifications
-        const { addToast, addSystemNotification } = useNotificationStore.getState();
-        const requester = useMasterDataStore.getState().users.find(u => u.name === loanRequest.requester);
-        
-        if (requester) {
-            addSystemNotification({
-                recipientId: requester.id,
-                actorName: approverName,
-                type: 'STATUS_CHANGE',
-                referenceId: updatedReturnDoc.docNumber,
-                message: `memverifikasi pengembalian: ${acceptedItems.length} diterima, ${rejectedItems.length} ditolak.`
-            });
-        }
-        addToast(`Verifikasi selesai. Dokumen: ${finalDocStatus}.`, 'success');
+        sendSystemNotif(returnDoc.returnedBy, 'STATUS_CHANGE', returnDocId, `Pengembalian telah diverifikasi (${finalDocStatus})`, false);
+        useNotificationStore.getState().addToast(`Verifikasi selesai. Dokumen: ${finalDocStatus}.`, 'success');
 
     } catch (error: any) {
         useNotificationStore.getState().addToast(error.message || 'Gagal memproses pengembalian.', 'error');
@@ -389,5 +415,5 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     } finally {
         set({ isLoading: false });
     }
-}
+  }
 }));
