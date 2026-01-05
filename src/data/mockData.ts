@@ -1,4 +1,5 @@
 
+// ... existing imports ...
 import {
     Asset,
     AssetCategory,
@@ -30,7 +31,6 @@ import {
 } from '../utils/permissions';
 
 // --- HELPER: DYNAMIC DATES ---
-// d(0) = Hari ini, d(-5) = 5 hari lalu, d(30) = 30 hari ke depan
 const getDate = (daysOffset: number): Date => {
     const date = new Date();
     date.setDate(date.getDate() + daysOffset);
@@ -47,7 +47,7 @@ const generateId = (prefix: string, daysOffset: number, sequence: string) => {
     return `${prefix}-${year}${month}${day}-${sequence}`;
 };
 
-// --- 1. USERS & DIVISIONS ---
+// ... existing users, divisions, categories, assets, customers ...
 export const mockDivisions: Division[] = [
     { id: 1, name: 'Network Engineering' },
     { id: 2, name: 'NOC (Network Operation Center)' },
@@ -67,7 +67,6 @@ export const initialMockUsers: User[] = [
     { id: 6, name: 'Staff NOC', email: 'noc@triniti.com', divisionId: 2, role: 'Staff', permissions: STAFF_PERMISSIONS },
 ];
 
-// --- 2. CATEGORIES ---
 export const initialAssetCategories: AssetCategory[] = [
     {
         id: 1, name: 'Perangkat Jaringan (Core)', isCustomerInstallable: false, associatedDivisions: [1, 2],
@@ -91,14 +90,12 @@ export const initialAssetCategories: AssetCategory[] = [
                 name: 'Kabel Dropcore', 
                 classification: 'material', 
                 trackingMethod: 'bulk', 
-                // Definisi level Tipe (Default)
                 unitOfMeasure: 'Hasbal', 
                 standardItems: [{ 
                     id: 311, 
                     name: 'Dropcore 1 Core', 
                     brand: 'FiberHome',
                     bulkType: 'measurement',
-                    // Definisi level Model (Spesifik) - PENTING: quantityPerUnit menentukan isi
                     unitOfMeasure: 'Hasbal',
                     baseUnitOfMeasure: 'Meter',
                     quantityPerUnit: 1000 
@@ -136,13 +133,10 @@ export const initialAssetCategories: AssetCategory[] = [
     }
 ];
 
-// --- 3. ASSETS ---
 export const mockAssets: Asset[] = [
-    // A. IN_STORAGE (Available)
     { id: 'AST-001', name: 'Mikrotik CCR1009', category: 'Perangkat Jaringan (Core)', type: 'Router Core', brand: 'Mikrotik', serialNumber: 'SN-MK-001', status: AssetStatus.IN_STORAGE, condition: AssetCondition.BRAND_NEW, location: 'Gudang Utama', registrationDate: d(-10), recordedBy: 'Admin Logistik', purchasePrice: 7500000, attachments: [], activityLog: [] },
     { id: 'AST-002', name: 'Huawei HG8245H', category: 'Perangkat Pelanggan (CPE)', type: 'ONT/ONU', brand: 'Huawei', serialNumber: 'SN-HW-A01', status: AssetStatus.IN_STORAGE, condition: AssetCondition.GOOD, location: 'Rak A-2', registrationDate: d(-20), recordedBy: 'Admin Logistik', purchasePrice: 450000, attachments: [], activityLog: [] },
     
-    // B. IN_USE (Complex History: Splicer)
     { 
         id: 'AST-003', 
         name: 'Fusion Splicer 90S', 
@@ -172,10 +166,8 @@ export const mockAssets: Asset[] = [
         ] 
     },
     
-    // B. IN_USE (Customer)
     { id: 'AST-004', name: 'ZTE F609', category: 'Perangkat Pelanggan (CPE)', type: 'ONT/ONU', brand: 'ZTE', serialNumber: 'SN-ZTE-55', status: AssetStatus.IN_USE, condition: AssetCondition.USED_OKAY, currentUser: 'CUST-001', location: 'Terpasang di: PT. Maju Jaya', registrationDate: d(-50), recordedBy: 'Admin Logistik', purchasePrice: 300000, attachments: [], activityLog: [] },
 
-    // C. DAMAGED / REPAIR
     { 
         id: 'AST-005', 
         name: 'OTDR MaxTester', 
@@ -201,7 +193,6 @@ export const mockAssets: Asset[] = [
     
     { id: 'AST-006', name: 'Mikrotik CCR1009', category: 'Perangkat Jaringan (Core)', type: 'Router Core', brand: 'Mikrotik', serialNumber: 'SN-MK-002', status: AssetStatus.OUT_FOR_REPAIR, condition: AssetCondition.MINOR_DAMAGE, location: 'Service Center Jakarta', registrationDate: d(-150), recordedBy: 'Admin Logistik', purchasePrice: 7500000, attachments: [], activityLog: [{ id: 2, action: 'Proses Perbaikan Dimulai', user: 'Admin Logistik', timestamp: d(-5), details: 'Dikirim ke vendor service.' }] },
 
-    // E. MATERIAL (Bulk Item) - Updated with balances
     { 
         id: 'MAT-001', 
         name: 'Dropcore 1 Core', 
@@ -219,7 +210,6 @@ export const mockAssets: Asset[] = [
         attachments: [], 
         activityLog: [] 
     },
-    // ADDED: Backup Asset for MAT-001
     { 
         id: 'MAT-003', 
         name: 'Dropcore 1 Core', 
@@ -233,18 +223,16 @@ export const mockAssets: Asset[] = [
         recordedBy: 'Admin Logistik', 
         purchasePrice: 1600, 
         initialBalance: 1000, 
-        currentBalance: 1000, // Full New Drum
+        currentBalance: 1000, 
         attachments: [], 
         activityLog: [] 
     },
     { id: 'MAT-002', name: 'Adaptor SC-UPC', category: 'Infrastruktur Fiber Optik', type: 'Konektor / Adaptor', brand: 'Generic', status: AssetStatus.IN_STORAGE, condition: AssetCondition.BRAND_NEW, location: 'Gudang Acc', registrationDate: d(-10), recordedBy: 'Admin Logistik', purchasePrice: 5000, attachments: [], activityLog: [] },
 
-    // F. ASSETS FROM SCENARIO RO-260101-0005 (Baru Saja Dicatat)
     { id: 'AST-MIK-001', name: 'Mikrotik CCR1009', category: 'Perangkat Jaringan (Core)', type: 'Router Core', brand: 'Mikrotik', serialNumber: 'SN-MIK-001', status: AssetStatus.IN_STORAGE, condition: AssetCondition.BRAND_NEW, location: 'Gudang Utama', registrationDate: d(0), recordedBy: 'Admin Logistik', purchasePrice: 7500000, attachments: [], activityLog: [], woRoIntNumber: 'RO-260101-0005' },
     { id: 'AST-MIK-002', name: 'Mikrotik CCR1009', category: 'Perangkat Jaringan (Core)', type: 'Router Core', brand: 'Mikrotik', serialNumber: 'SN-MIK-002', status: AssetStatus.IN_STORAGE, condition: AssetCondition.BRAND_NEW, location: 'Gudang Utama', registrationDate: d(0), recordedBy: 'Admin Logistik', purchasePrice: 7500000, attachments: [], activityLog: [], woRoIntNumber: 'RO-260101-0005' }
 ];
 
-// --- 4. CUSTOMERS ---
 export const mockCustomers: Customer[] = [
     {
         id: 'CUST-001', name: 'PT. Maju Jaya', address: 'Jl. Sudirman Kav 50', phone: '021-555001', email: 'admin@majujaya.com',
@@ -265,129 +253,6 @@ export const mockCustomers: Customer[] = [
     }
 ];
 
-// --- 5. REQUESTS (RO) ---
-export const initialMockRequests: Request[] = [
-    // Case 1: PENDING (RO-YYMMDD-NNNN)
-    {
-        id: generateId('RO', 0, '0001'), 
-        docNumber: generateId('RO', 0, '0001'),
-        requester: 'Staff Teknisi', 
-        division: 'Technical Support', 
-        requestDate: d(0), 
-        status: ItemStatus.PENDING,
-        order: { type: 'Regular Stock' },
-        items: [{ id: 1, itemName: 'Fast Connector SC/UPC', itemTypeBrand: 'Generic', quantity: 100, keterangan: 'Stok menipis' }],
-        activityLog: []
-    },
-    // Case 2: LOGISTIC APPROVED
-    {
-        id: generateId('RO', -1, '0001'),
-        docNumber: generateId('RO', -1, '0001'),
-        requester: 'Leader Network', 
-        division: 'Network Engineering', 
-        requestDate: d(-1), 
-        status: ItemStatus.LOGISTIC_APPROVED,
-        logisticApprover: 'Admin Logistik', 
-        logisticApprovalDate: d(0),
-        order: { type: 'Project Based', project: 'Expansion Area B' },
-        items: [
-            { id: 1, itemName: 'Mikrotik CCR1009', itemTypeBrand: 'Mikrotik', quantity: 2, keterangan: 'Core Router baru' },
-            { id: 2, itemName: 'SFP Module 10G', itemTypeBrand: 'Mikrotik', quantity: 4, keterangan: 'Uplink' }
-        ],
-        itemStatuses: { 1: { status: 'approved', approvedQuantity: 2 }, 2: { status: 'approved', approvedQuantity: 4 } },
-        activityLog: []
-    },
-    // Case 3: SCENARIO BUG FIX TEST - SIAP SERAH TERIMA
-    // Semua barang sudah dicatat (isRegistered=true), Status=AWAITING_HANDOVER
-    {
-        id: 'RO-260101-0005',
-        docNumber: 'RO-260101-0005',
-        requester: 'Leader Network', 
-        division: 'Network Engineering',
-        requestDate: '2026-01-01T23:07:23.000Z',
-        status: ItemStatus.AWAITING_HANDOVER, // Status Kunci untuk tes
-        logisticApprover: 'Admin Logistik', 
-        logisticApprovalDate: d(-2),
-        finalApprover: 'Super Admin', 
-        finalApprovalDate: d(-2),
-        order: { type: 'Project Based', project: 'Upgrade Infrastruktur Server' },
-        items: [
-            { id: 1, itemName: 'Mikrotik CCR1009', itemTypeBrand: 'Mikrotik', quantity: 2, keterangan: 'Main Router', categoryId: '1', typeId: '11' }
-        ],
-        itemStatuses: {
-            1: { status: 'approved', approvedQuantity: 2 }
-        },
-        purchaseDetails: {
-             1: { purchasePrice: 7500000, vendor: 'Citra Web', poNumber: 'PO-TEST-005', invoiceNumber: 'INV-005', purchaseDate: d(-1), filledBy: 'Admin Purchase', fillDate: d(-1) }
-        },
-        arrivalDate: d(0),
-        isRegistered: true, // Flag Kunci
-        partiallyRegisteredItems: { 1: 2 }, // 2 dari 2 sudah diregister
-        activityLog: []
-    }
-];
-
-// --- 6. LOAN REQUESTS (RL) ---
-export const mockLoanRequests: LoanRequest[] = [
-    {
-        id: generateId('RL', -5, '0001'),
-        requester: 'Staff Teknisi', division: 'Technical Support', requestDate: d(-5), status: LoanRequestStatus.ON_LOAN,
-        items: [{ id: 1, itemName: 'Fusion Splicer 90S', brand: 'Fujikura', quantity: 1, keterangan: 'Maintenance Area Selatan', returnDate: d(2) }],
-        approver: 'Admin Logistik', approvalDate: d(-5),
-        assignedAssetIds: { 1: ['AST-003'] },
-        notes: 'Peminjaman alat kerja reguler'
-    }
-];
-
-// --- 7. RETURNS (RR) ---
-export const mockReturns: AssetReturn[] = [
-    {
-        id: generateId('RR', 0, '0001'), 
-        docNumber: generateId('RR', 0, '0001'), 
-        returnDate: d(0), 
-        loanRequestId: generateId('RL', -3, '0001'),
-        returnedBy: 'Staff NOC',
-        status: AssetReturnStatus.PENDING_APPROVAL,
-        items: [{ assetId: 'AST-008', assetName: 'Laptop Admin', returnedCondition: AssetCondition.GOOD, notes: 'Sudah selesai dipakai', status: 'PENDING' }]
-    }
-];
-
-// --- 8. TRANSACTIONS (HO, DSM, MNT, INST) ---
-export const mockHandovers: Handover[] = [
-    { 
-        id: generateId('HO', -360, '0001'), 
-        docNumber: generateId('HO', -360, '0001'), 
-        handoverDate: d(-360), 
-        menyerahkan: 'Admin Logistik', penerima: 'Staff Teknisi', mengetahui: 'Super Admin', 
-        items: [{ id: 1, itemName: 'Fusion Splicer 90S', itemTypeBrand: 'Fujikura', conditionNotes: 'Baru', quantity: 1, checked: true, assetId: 'AST-003' }], 
-        status: ItemStatus.COMPLETED 
-    }
-];
-
-export const mockDismantles: Dismantle[] = [
-    { 
-        id: generateId('DSM', -5, '0001'), 
-        docNumber: generateId('DSM', -5, '0001'), 
-        dismantleDate: d(-5), 
-        requestNumber: 'REQ-OLD-99', 
-        assetId: 'AST-002', assetName: 'Huawei HG8245H', 
-        technician: 'Staff Teknisi', customerId: 'CUST-003', customerName: 'Ruko Indah Makmur', customerAddress: 'Komp Ruko', 
-        retrievedCondition: AssetCondition.GOOD, notes: 'Pelanggan suspend', 
-        status: ItemStatus.COMPLETED, acknowledger: 'Admin Logistik' 
-    }
-];
-
-export const mockInstallations: Installation[] = [
-    { 
-        id: generateId('INST', -45, '0001'), 
-        docNumber: generateId('WO-IKR', -45, '0001'),
-        installationDate: d(-45), 
-        technician: 'Staff Teknisi', customerId: 'CUST-001', customerName: 'PT. Maju Jaya', 
-        assetsInstalled: [], materialsUsed: [{ itemName: 'Dropcore 1 Core', brand: 'FiberHome', quantity: 150, unit: 'Meter' }], 
-        notes: 'Instalasi baru', status: ItemStatus.COMPLETED 
-    }
-];
-
 export const mockMaintenances: Maintenance[] = [
     { 
         id: generateId('MNT', -2, '0001'), 
@@ -395,18 +260,126 @@ export const mockMaintenances: Maintenance[] = [
         maintenanceDate: d(-2), 
         technician: 'Staff Teknisi', customerId: 'CUST-001', customerName: 'PT. Maju Jaya', 
         problemDescription: 'Internet mati total', actionsTaken: 'Splicing ulang kabel putus', workTypes: ['Splicing FO'], 
-        status: ItemStatus.COMPLETED, completedBy: 'Admin Logistik' 
+        status: ItemStatus.COMPLETED, completedBy: 'Admin Logistik',
+        notes: 'Pekerjaan selesai dengan baik. Kabel sudah dirapikan kembali.',
+        attachments: [
+            { id: 1, name: 'Foto_Kabel_Putus.jpg', url: 'https://via.placeholder.com/300x200.png?text=Kabel+Putus', type: 'image' },
+            { id: 2, name: 'Foto_Hasil_Splicing.jpg', url: 'https://via.placeholder.com/300x200.png?text=Hasil+Splicing', type: 'image' },
+            { id: 3, name: 'Berita_Acara_Fisik.pdf', url: '#', type: 'pdf' }
+        ]
     }
 ];
 
-// --- 9. STOCK MOVEMENTS ---
-export const mockStockMovements: StockMovement[] = [
-    { id: 'MOV-001', assetName: 'Dropcore 1 Core', brand: 'FiberHome', date: d(-60), type: 'IN_PURCHASE', quantity: 1000, balanceAfter: 1000, referenceId: 'PO-001', actor: 'Admin Logistik', notes: 'Stok awal' },
-    { id: 'MOV-002', assetName: 'Dropcore 1 Core', brand: 'FiberHome', date: d(-45), type: 'OUT_INSTALLATION', quantity: 150, balanceAfter: 850, referenceId: generateId('WO-IKR', -45, '0001'), actor: 'Staff Teknisi', notes: 'Instalasi PT. Maju Jaya' },
-    { id: 'MOV-003', assetName: 'Adaptor SC-UPC', brand: 'Generic', date: d(-10), type: 'IN_PURCHASE', quantity: 500, balanceAfter: 500, referenceId: 'PO-002', actor: 'Admin Logistik', notes: 'Stok awal aksesoris' }
+export const initialMockRequests: Request[] = [
+    {
+        id: 'RO-240101-0001',
+        docNumber: 'RO-240101-0001',
+        requester: 'Staff Teknisi',
+        division: 'Technical Support',
+        requestDate: d(-5),
+        status: ItemStatus.PENDING,
+        order: { type: 'Regular Stock' },
+        items: [
+            { id: 1, itemName: 'Dropcore 1 Core', itemTypeBrand: 'FiberHome', quantity: 10, keterangan: 'Stok menipis' }
+        ],
+        activityLog: []
+    }
+];
+
+export const mockHandovers: Handover[] = [
+    {
+        id: 'HO-001',
+        docNumber: 'HO-240110-001',
+        handoverDate: d(-10),
+        menyerahkan: 'Admin Logistik',
+        penerima: 'Staff Teknisi',
+        mengetahui: 'Super Admin',
+        status: ItemStatus.COMPLETED,
+        items: [
+             { id: 1, assetId: 'AST-003', itemName: 'Fusion Splicer 90S', itemTypeBrand: 'Fujikura', conditionNotes: 'Baik', quantity: 1, checked: true }
+        ]
+    }
+];
+
+export const mockDismantles: Dismantle[] = [
+    {
+        id: 'DSM-001',
+        docNumber: 'WO-DSM-240120-001',
+        dismantleDate: d(-1),
+        technician: 'Staff Teknisi',
+        customerId: 'CUST-003',
+        customerName: 'Ruko Indah Makmur',
+        customerAddress: 'Komp. Ruko Blok B',
+        assetId: 'AST-005',
+        assetName: 'OTDR MaxTester', 
+        retrievedCondition: AssetCondition.MAJOR_DAMAGE,
+        status: ItemStatus.IN_PROGRESS,
+        notes: 'Ditarik karena pelanggan suspend service. Unit dalam kondisi fisik kurang baik, casing retak.',
+        acknowledger: null,
+        attachments: [
+            { id: 1, name: 'Foto_Kondisi_Fisik.jpg', url: 'https://via.placeholder.com/300x200.png?text=Fisik+Retak', type: 'image' },
+            { id: 2, name: 'BAST_Penarikan.pdf', url: '#', type: 'pdf' }
+        ]
+    }
 ];
 
 export const mockNotifications: Notification[] = [
-    { id: 1, recipientId: 2, actorName: 'Staff Teknisi', type: 'ASSET_DAMAGED_REPORT', message: 'melaporkan kerusakan pada aset', referenceId: 'AST-005', isRead: false, timestamp: d(0) },
-    { id: 2, recipientId: 3, actorName: 'Admin Logistik', type: 'REQUEST_LOGISTIC_APPROVED', message: 'menyetujui request, mohon isi detail pembelian', referenceId: generateId('RO', -1, '0001'), isRead: false, timestamp: d(0) }
+    {
+        id: 1,
+        recipientId: 2, 
+        actorName: 'Staff Teknisi',
+        type: 'REQUEST_CREATED',
+        referenceId: 'RO-240101-0001',
+        message: 'membuat permintaan aset baru.',
+        isRead: false,
+        timestamp: d(0)
+    }
+];
+
+export const mockLoanRequests: LoanRequest[] = [
+    {
+        id: 'RL-240105-0001',
+        requester: 'Staff Teknisi',
+        division: 'Technical Support',
+        requestDate: d(-2),
+        status: LoanRequestStatus.PENDING,
+        items: [
+            { id: 1, itemName: 'Fusion Splicer 90S', brand: 'Fujikura', quantity: 1, keterangan: 'Peminjaman untuk project A', returnDate: d(5) }
+        ]
+    }
+];
+
+export const mockInstallations: Installation[] = [
+    {
+        id: 'INST-001',
+        docNumber: 'WO-IKR-240115-001',
+        installationDate: d(-5),
+        technician: 'Staff Teknisi',
+        customerId: 'CUST-001',
+        customerName: 'PT. Maju Jaya',
+        assetsInstalled: [
+            { assetId: 'AST-004', assetName: 'ZTE F609' }
+        ],
+        materialsUsed: [
+             { itemName: 'Dropcore 1 Core', brand: 'FiberHome', quantity: 150, unit: 'Meter' }
+        ],
+        status: ItemStatus.COMPLETED,
+        notes: 'Instalasi berjalan lancar.'
+    }
+];
+
+export const mockReturns: AssetReturn[] = [];
+
+export const mockStockMovements: StockMovement[] = [
+    {
+        id: 'MOV-001',
+        assetName: 'Dropcore 1 Core',
+        brand: 'FiberHome',
+        date: d(-30),
+        type: 'IN_PURCHASE',
+        quantity: 1000,
+        balanceAfter: 1000,
+        actor: 'Admin Logistik',
+        notes: 'Stok Awal'
+    }
 ];

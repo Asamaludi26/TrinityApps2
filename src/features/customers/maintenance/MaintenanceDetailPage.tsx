@@ -1,3 +1,4 @@
+
 import React, { useMemo, useState } from 'react';
 import { Maintenance, User, ItemStatus, Asset } from '../../../types';
 import { DetailPageLayout } from '../../../components/layout/DetailPageLayout';
@@ -7,9 +8,12 @@ import { ApprovalStamp } from '../../../components/ui/ApprovalStamp';
 import { InfoIcon } from '../../../components/icons/InfoIcon';
 import { SpinnerIcon } from '../../../components/icons/SpinnerIcon';
 import { CheckIcon } from '../../../components/icons/CheckIcon';
-import { BsArrowRight } from 'react-icons/bs';
+import { BsArrowRight, BsFilePdf, BsImage } from 'react-icons/bs';
 import { PaperclipIcon } from '../../../components/icons/PaperclipIcon';
 import { ClickableLink } from '../../../components/ui/ClickableLink';
+import { DownloadIcon } from '../../../components/icons/DownloadIcon';
+import { EyeIcon } from '../../../components/icons/EyeIcon';
+import { viewAttachment } from '../../../utils/fileUtils';
 
 interface MaintenanceDetailPageProps {
     maintenance: Maintenance;
@@ -275,15 +279,46 @@ const MaintenanceDetailPage: React.FC<MaintenanceDetailPageProps> = ({ maintenan
                     </div>
                 </section>
                 
+                {maintenance.notes && (
+                    <section className="mt-8 pt-6 border-t">
+                        <h4 className="font-semibold text-gray-800 border-b pb-1 mb-2">Catatan Tambahan</h4>
+                        <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded border border-gray-200 italic">"{maintenance.notes}"</p>
+                    </section>
+                )}
+                
+                {/* NEW: Attachment Section */}
                 {maintenance.attachments && maintenance.attachments.length > 0 && (
                      <section className="mt-8 pt-6 border-t">
                         <h4 className="font-semibold text-gray-800 border-b pb-1 mb-4">Lampiran</h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                             {maintenance.attachments.map(att => (
-                                <a key={att.id} href={att.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-3 text-sm bg-gray-50 border rounded-lg hover:bg-gray-100 hover:border-gray-300">
-                                    <PaperclipIcon className="w-5 h-5 text-gray-500 flex-shrink-0" />
-                                    <span className="truncate font-medium text-gray-800">{att.name}</span>
-                                </a>
+                                <div key={att.id} className="group relative bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all">
+                                    <div className="aspect-w-16 aspect-h-10 bg-gray-100 flex items-center justify-center overflow-hidden">
+                                        {att.type === 'image' ? (
+                                            <img src={att.url} alt={att.name} className="object-cover w-full h-32 group-hover:scale-105 transition-transform duration-500" />
+                                        ) : (
+                                            <div className="flex flex-col items-center justify-center h-32 text-gray-400">
+                                                <BsFilePdf className="w-10 h-10 mb-2" />
+                                                <span className="text-[10px] uppercase font-bold">Dokumen</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="p-3">
+                                        <p className="text-xs font-semibold text-gray-800 truncate mb-2" title={att.name}>{att.name}</p>
+                                        <div className="flex gap-2">
+                                            <button 
+                                                type="button"
+                                                onClick={() => viewAttachment(att.url, att.name)} 
+                                                className="flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] font-bold text-gray-600 bg-gray-50 rounded hover:bg-gray-100 hover:text-tm-primary transition-colors border border-gray-200"
+                                            >
+                                                <EyeIcon className="w-3 h-3" /> Lihat
+                                            </button>
+                                            <a href={att.url} download={att.name} className="flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] font-bold text-gray-600 bg-gray-50 rounded hover:bg-gray-100 hover:text-tm-primary transition-colors border border-gray-200">
+                                                <DownloadIcon className="w-3 h-3" /> Unduh
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
                             ))}
                         </div>
                     </section>

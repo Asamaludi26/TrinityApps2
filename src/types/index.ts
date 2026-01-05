@@ -498,6 +498,7 @@ export interface Installation {
     status: ItemStatus;
     acknowledger?: string | null;
     createdBy?: string;
+    attachments?: Attachment[]; // Added
 }
 
 export interface MaintenanceReplacement {
@@ -538,6 +539,7 @@ export interface Maintenance {
     status: ItemStatus;
     completedBy?: string;
     completionDate?: string;
+    notes?: string; // NEW: Added Notes field
 }
 
 export type NotificationType = 'info' | 'success' | 'warning' | 'error' | 'SYSTEM' | string;

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Asset, Customer, User, AssetCondition, Attachment, Page, AssetStatus, Dismantle } from '../../../types';
+import { Asset, Customer, User, AssetCondition, Page, AssetStatus, Dismantle } from '../../../types';
 import DatePicker from '../../../components/ui/DatePicker';
 import { useNotification } from '../../../providers/NotificationProvider';
 import FloatingActionBar from '../../../components/ui/FloatingActionBar';
@@ -12,7 +12,11 @@ import { TrashIcon } from '../../../components/icons/TrashIcon';
 import { SpinnerIcon } from '../../../components/icons/SpinnerIcon';
 import { generateDocumentNumber } from '../../../utils/documentNumberGenerator';
 import { useCustomerAssetLogic } from '../hooks/useCustomerAssetLogic';
-import { BsBoxSeam, BsLightningFill, BsInfoCircle } from 'react-icons/bs';
+import { BsBoxSeam, BsLightningFill, BsInfoCircle, BsExclamationTriangle } from 'react-icons/bs';
+
+// New Imports
+import { useFileAttachment } from '../../../hooks/useFileAttachment';
+import { MAX_FILE_SIZE_MB } from '../../../utils/fileUtils';
 
 interface DismantleFormProps {
     currentUser: User;
@@ -38,7 +42,9 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
     const [technician, setTechnician] = useState('');
     const [retrievedCondition, setRetrievedCondition] = useState<AssetCondition>(AssetCondition.USED_OKAY);
     const [notes, setNotes] = useState<string>('');
-    const [attachments, setAttachments] = useState<File[]>([]);
+    
+    // File Handling Hook
+    const { files, errors: fileErrors, addFiles, removeFile, processAttachmentsForSubmit } = useFileAttachment();
     const [isDragging, setIsDragging] = useState(false);
 
     const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
@@ -55,13 +61,9 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
     const selectedAsset = useMemo(() => assetsForCustomer.find(a => a.id === selectedAssetId) || null, [assetsForCustomer, selectedAssetId]);
     const selectedCustomer = useMemo(() => customers.find(c => c.id === selectedCustomerId) || null, [customers, selectedCustomerId]);
     
-    // LOGIC UPDATE: Filter Customers with Active Assets Only
-    // Kita hanya mengizinkan dismantle untuk pelanggan yang MEMILIKI Aset (Device) yang statusnya IN_USE.
-    // Material (Consumables) tidak dihitung karena tidak ditarik kembali.
     const activeCustomerIds = useMemo(() => {
         const ids = new Set<string>();
         assets.forEach(a => {
-            // Cek jika aset sedang digunakan oleh customer (bukan di gudang/rusak di gudang)
             if (a.status === AssetStatus.IN_USE && a.currentUser) {
                 ids.add(a.currentUser);
             }
@@ -71,7 +73,7 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
 
     const customerOptions = useMemo(() => {
         return customers
-            .filter(c => activeCustomerIds.has(c.id)) // Hanya tampilkan pelanggan yang punya aset aktif
+            .filter(c => activeCustomerIds.has(c.id))
             .map(c => ({ value: c.id, label: `${c.name} (${c.id})` }));
     }, [customers, activeCustomerIds]);
 
@@ -84,13 +86,19 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
         setTechnician(currentUser.name);
     }, [currentUser]);
 
+    // Menampilkan error file via notifikasi
+    useEffect(() => {
+        if (fileErrors.length > 0) {
+            fileErrors.forEach(err => addNotification(err, 'error'));
+        }
+    }, [fileErrors, addNotification]);
+
     useEffect(() => {
         if (prefillAsset) {
             setSelectedCustomerId(prefillAsset.currentUser || '');
             setSelectedAssetId(prefillAsset.id);
         } else if (prefillCustomerId) {
             setSelectedCustomerId(prefillCustomerId);
-            // Don't auto select asset if multiple, let user choose from table
             const customerAssets = getCustomerAssets(prefillCustomerId);
             if (customerAssets.length === 1) {
                 setSelectedAssetId(customerAssets[0].id);
@@ -120,13 +128,9 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
     
     // --- EVENT HANDLERS ---
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        if (event.target.files) {
-            setAttachments(prev => [...prev, ...Array.from(event.target.files!)]);
+        if (event.target.files && event.target.files.length > 0) {
+            addFiles(Array.from(event.target.files));
         }
-    };
-
-    const removeAttachment = (fileName: string) => {
-        setAttachments(prev => prev.filter(file => file.name !== fileName));
     };
     
     const handleDragEvents = (e: React.DragEvent<HTMLDivElement>) => {
@@ -140,26 +144,22 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
         e.preventDefault();
         e.stopPropagation();
         setIsDragging(false);
-        if (e.dataTransfer.files?.length > 0) {
-            setAttachments(prev => [...prev, ...Array.from(e.dataTransfer.files!)]);
-            e.dataTransfer.clearData();
+        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            addFiles(Array.from(e.dataTransfer.files));
         }
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!selectedAsset || !selectedCustomer) {
             addNotification('Harap pilih aset yang akan ditarik.', 'error');
             return;
         }
         setIsSubmitting(true);
-        setTimeout(() => {
-            const processedAttachments: Attachment[] = attachments.map((file, index) => ({
-                id: Date.now() + index,
-                name: file.name,
-                url: URL.createObjectURL(file), 
-                type: file.type.startsWith('image/') ? 'image' : (file.type === 'application/pdf' ? 'pdf' : 'other'),
-            }));
+        
+        try {
+            // Process files to Base64 (Async)
+            const processedAttachments = await processAttachmentsForSubmit();
 
             onSave({
                 docNumber,
@@ -173,11 +173,15 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
                 customerAddress: selectedCustomer.address,
                 retrievedCondition,
                 notes: notes.trim() || null,
-                acknowledger: null, // Admin gudang yang akan mengisi ini
+                acknowledger: null, 
                 attachments: processedAttachments,
             });
+        } catch (error) {
+            console.error("Submission failed", error);
+            addNotification('Gagal memproses data. Coba lagi.', 'error');
+        } finally {
             setIsSubmitting(false);
-        }, 1000);
+        }
     };
 
     // --- SUB-COMPONENTS ---
@@ -236,12 +240,6 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
                                 isSearchable
                                 disabled={!!prefillCustomerId || !!prefillAsset}
                             />
-                            {!selectedCustomerId && (
-                                <p className="mt-1.5 text-xs text-gray-500">
-                                    <BsInfoCircle className="inline-block w-3 h-3 mr-1 mb-0.5" />
-                                    Hanya menampilkan pelanggan yang memiliki perangkat terpasang.
-                                </p>
-                            )}
                         </div>
                         {selectedCustomer && (
                             <div className="text-sm text-gray-600 bg-white p-3 rounded border">
@@ -252,7 +250,6 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
                     </div>
                 </div>
 
-                {/* ASSET SELECTION TABLE */}
                 {selectedCustomer && (
                     <div className="space-y-6">
                         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
@@ -307,41 +304,6 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
                                 <div className="p-6 text-center text-sm text-gray-500">Tidak ada perangkat terpasang.</div>
                             )}
                         </div>
-
-                        {/* MATERIAL TABLE (READ ONLY) */}
-                        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden opacity-80">
-                            <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
-                                <div className="flex items-center gap-2">
-                                    <BsLightningFill className="text-orange-500"/>
-                                    <h4 className="font-semibold text-gray-800 text-sm">Material Terpasang</h4>
-                                </div>
-                                <div className="flex items-center gap-2 bg-orange-100 text-orange-800 px-2 py-0.5 rounded text-xs font-medium">
-                                    <BsInfoCircle className="w-3 h-3"/> Tidak Ditarik (Consumed)
-                                </div>
-                            </div>
-                             {selectedCustomer.installedMaterials && selectedCustomer.installedMaterials.length > 0 ? (
-                                <table className="min-w-full divide-y divide-gray-200">
-                                    <thead className="bg-gray-50">
-                                        <tr>
-                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
-                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Jumlah</th>
-                                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="bg-white divide-y divide-gray-200">
-                                        {selectedCustomer.installedMaterials.map((mat, idx) => (
-                                            <tr key={idx}>
-                                                <td className="px-4 py-2 text-sm text-gray-700">{mat.itemName} <span className="text-gray-400 text-xs">({mat.brand})</span></td>
-                                                <td className="px-4 py-2 text-sm text-gray-700">{mat.quantity} {mat.unit}</td>
-                                                <td className="px-4 py-2 text-xs italic text-gray-400">Ditinggal di lokasi</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                             ) : (
-                                 <div className="p-4 text-center text-sm text-gray-400">Tidak ada material tercatat.</div>
-                             )}
-                        </div>
                     </div>
                 )}
 
@@ -357,21 +319,24 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
                         </div>
                         <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-gray-700">Catatan Penarikan</label>
-                            <textarea id="dismantleNotes" value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="block w-full px-3 py-2 mt-1 text-gray-900 placeholder:text-gray-400 bg-gray-50 border border-gray-300 rounded-lg shadow-sm sm:text-sm" placeholder="Contoh: Unit ditarik karena pelanggan upgrade, kondisi fisik baik..."></textarea>
+                            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} className="block w-full px-3 py-2 mt-1 text-gray-900 placeholder:text-gray-400 bg-gray-50 border border-gray-300 rounded-lg shadow-sm sm:text-sm" placeholder="Contoh: Unit ditarik karena pelanggan upgrade, kondisi fisik baik..."></textarea>
                         </div>
+                         
+                         {/* ATTACHMENT SECTION (REFACTORED) */}
                          <div className="md:col-span-2">
-                            <label className="block text-sm font-medium text-gray-700">Lampiran (Foto Kondisi, dll)</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Lampiran (Foto Kondisi, BAST Fisik)</label>
+                            
                             <div 
                                 onDragEnter={handleDragEvents} 
                                 onDragOver={handleDragEvents} 
                                 onDragLeave={handleDragEvents} 
                                 onDrop={handleDrop}
-                                className={`flex items-center justify-center w-full px-6 pt-5 pb-6 mt-1 border-2 border-dashed rounded-md transition-colors
-                                    ${isDragging ? 'border-tm-primary bg-blue-50' : 'border-gray-300'}`
+                                className={`flex flex-col items-center justify-center w-full px-6 pt-5 pb-6 mt-1 border-2 border-dashed rounded-lg transition-colors
+                                    ${isDragging ? 'border-tm-primary bg-blue-50' : 'border-gray-300 hover:bg-gray-50'}`
                                 }
                             >
                                 <div className="space-y-1 text-center">
-                                <PaperclipIcon className="w-10 h-10 mx-auto text-gray-400" />
+                                    <PaperclipIcon className="w-10 h-10 mx-auto text-gray-400" />
                                     <div className="flex text-sm text-gray-600">
                                         <label htmlFor="file-upload" className="relative font-medium bg-transparent rounded-md cursor-pointer text-tm-primary hover:text-tm-accent focus-within:outline-none">
                                             <span>Pilih file</span>
@@ -379,15 +344,31 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
                                         </label>
                                         <p className="pl-1">atau tarik dan lepas</p>
                                     </div>
-                                    <p className="text-xs text-gray-500">PNG, JPG, PDF hingga 10MB</p>
+                                    <p className="text-xs text-gray-500">JPG, PNG, PDF (Max {MAX_FILE_SIZE_MB}MB)</p>
                                 </div>
                             </div>
-                            {attachments.length > 0 && (
-                                <div className="mt-4 space-y-2">
-                                    {attachments.map(file => (
-                                        <div key={file.name} className="flex items-center justify-between p-2 text-sm text-gray-700 bg-gray-100 border border-gray-200 rounded-md">
-                                            <span className="truncate">{file.name}</span>
-                                            <button type="button" onClick={() => removeAttachment(file.name)} className="text-red-500 hover:text-red-700">
+
+                            {/* Error Warning */}
+                            {fileErrors.length > 0 && (
+                                <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-600 flex items-center gap-2">
+                                    <BsExclamationTriangle /> {fileErrors[0]}
+                                </div>
+                            )}
+
+                            {/* File List */}
+                            {files.length > 0 && (
+                                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {files.map((item) => (
+                                        <div key={item.id} className="flex items-center justify-between p-2 text-sm text-gray-700 bg-white border border-gray-200 rounded-md shadow-sm">
+                                            <div className="flex items-center gap-2 overflow-hidden">
+                                                {item.file.type.startsWith('image/') ? (
+                                                    <img src={item.previewUrl} alt="preview" className="w-8 h-8 object-cover rounded" />
+                                                ) : (
+                                                    <div className="w-8 h-8 bg-gray-100 rounded flex items-center justify-center text-gray-500 text-xs font-bold">PDF</div>
+                                                )}
+                                                <span className="truncate max-w-[150px]">{item.file.name}</span>
+                                            </div>
+                                            <button type="button" onClick={() => removeFile(item.id)} className="text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-50">
                                                 <TrashIcon className="w-4 h-4" />
                                             </button>
                                         </div>
