@@ -40,9 +40,10 @@ const InstallationFormPage: React.FC<InstallationFormPageProps> = (props) => {
     const installations = useTransactionStore((state) => state.installations);
     const addInstallation = useTransactionStore((state) => state.addInstallation);
     
-    const assets = useAssetStore((state) => state.assets);
-    const assetCategories = useAssetStore((state) => state.categories);
+    // Asset Actions
     const updateAsset = useAssetStore((state) => state.updateAsset);
+    const consumeMaterials = useAssetStore((state) => state.consumeMaterials); // USE NEW ACTION
+    
     const customers = useMasterDataStore((state) => state.customers);
     const updateCustomer = useMasterDataStore((state) => state.updateCustomer);
     const users = useMasterDataStore((state) => state.users);
@@ -139,7 +140,7 @@ const InstallationFormPage: React.FC<InstallationFormPageProps> = (props) => {
         
         await addInstallation(newInstallation);
 
-        // 1. Update Assets Status (Perangkat/Device)
+        // 1. Update Assets Status (Perangkat/Device - Individual Tracking)
         for (const item of installationData.assetsInstalled) {
             if (item.assetId) {
                 await updateAsset(item.assetId, {
@@ -151,79 +152,25 @@ const InstallationFormPage: React.FC<InstallationFormPageProps> = (props) => {
             }
         }
 
-        // 2. Update Stock for Materials (Smart Consume Logic)
+        // 2. Update Stock for Materials (Bulk Tracking - Centralized)
         if (installationData.materialsUsed && installationData.materialsUsed.length > 0) {
              const customer = customers.find(c => c.id === installationData.customerId);
              
-             // A. Consume Stock
-             for (const mat of installationData.materialsUsed) {
-                // Identifikasi tipe measurement
-                let isMeasurement = false;
-                for (const cat of assetCategories) {
-                    for (const type of cat.types) {
-                        const model = type.standardItems?.find(i => i.name === mat.itemName && i.brand === mat.brand);
-                        if (model && model.bulkType === 'measurement') {
-                            isMeasurement = true;
-                        }
-                    }
-                }
+             // A. Consume Stock via Store Action
+             const result = await consumeMaterials(
+                 installationData.materialsUsed,
+                 { 
+                     customerId: installationData.customerId, 
+                     location: `Terpasang di: ${installationData.customerName}` 
+                 }
+             );
 
-                const availableStock = assets
-                    .filter(a => 
-                        a.name === mat.itemName && 
-                        a.brand === mat.brand && 
-                        a.status === AssetStatus.IN_STORAGE
-                    )
-                    .sort((a, b) => new Date(a.registrationDate).getTime() - new Date(b.registrationDate).getTime());
-
-                if (isMeasurement) {
-                    // MEASUREMENT LOGIC (KABEL)
-                    let remainingNeed = mat.quantity;
-                    
-                    for (const asset of availableStock) {
-                        if (remainingNeed <= 0) break;
-                        
-                        const currentBalance = asset.currentBalance ?? asset.initialBalance ?? 0;
-                        if (currentBalance <= 0) continue;
-
-                        if (currentBalance > remainingNeed) {
-                            // Partial Use -> Balance berkurang, Status TETAP IN_STORAGE
-                            const newBalance = currentBalance - remainingNeed;
-                            await updateAsset(asset.id, {
-                                currentBalance: newBalance,
-                                status: AssetStatus.IN_STORAGE,
-                                activityLog: []
-                            });
-                            remainingNeed = 0;
-                        } else {
-                            // Full Use of this reel -> Balance 0, Status CONSUMED
-                            const consumed = currentBalance;
-                            remainingNeed -= consumed;
-                            await updateAsset(asset.id, {
-                                currentBalance: 0,
-                                status: AssetStatus.CONSUMED,
-                                activityLog: []
-                            });
-                        }
-                    }
-                } else {
-                    // COUNT LOGIC (KONEKTOR)
-                    const qtyToConsume = Math.min(mat.quantity, availableStock.length);
-                    if (qtyToConsume > 0) {
-                        const itemsToUpdate = availableStock.slice(0, qtyToConsume);
-                        for (const item of itemsToUpdate) {
-                             await updateAsset(item.id, {
-                                status: AssetStatus.IN_USE,
-                                currentUser: installationData.customerId,
-                                location: `Terpasang di: ${installationData.customerName}`,
-                                activityLog: [] 
-                            });
-                        }
-                    }
-                }
+             // Display warnings if stock ran out
+             if (result.warnings.length > 0) {
+                 result.warnings.forEach(w => addNotification(w, 'warning'));
              }
 
-             // B. Update Customer Record
+             // B. Update Customer Record (Log Usage on Customer Profile)
              if (customer) {
                  const existingMaterials = customer.installedMaterials || [];
                  const updatedMaterials = [...existingMaterials];

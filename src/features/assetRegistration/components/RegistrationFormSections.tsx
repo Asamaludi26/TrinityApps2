@@ -275,10 +275,10 @@ export const TrackingSection: React.FC<TrackingSectionProps> = ({
                                             type="number" 
                                             value={selectedModel?.quantityPerUnit || ''} 
                                             readOnly 
-                                            className="block w-full py-2 text-gray-700 bg-gray-100 border border-gray-200 rounded-md shadow-sm sm:text-sm cursor-not-allowed" 
+                                            className="block w-full py-2 text-gray-700 bg-gray-100 border border-gray-200 rounded-md shadow-sm sm:text-sm cursor-not-allowed font-bold" 
                                         />
                                     </div>
-                                    <p className="mt-1 text-xs text-gray-500">Konfigurasi standar dari Model.</p>
+                                    <p className="mt-1 text-xs text-gray-500">Konfigurasi otomatis dari Model (Master Data).</p>
                                 </div>
                             </div>
                         </>

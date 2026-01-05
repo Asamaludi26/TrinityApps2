@@ -309,12 +309,14 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
                 notes: data.notes,
                 serialNumber: data.bulkItems[0]?.serialNumber, 
                 macAddress: data.bulkItems[0]?.macAddress,
+                // --- FIX: Ensure balances are updated on edit if needed
+                initialBalance: data.bulkItems[0]?.initialBalance,
+                currentBalance: data.bulkItems[0]?.currentBalance,
             };
             await updateAsset(assetIdToUpdate, updates);
             addNotification(`Aset ${data.assetName} berhasil diperbarui.`, 'success');
         } else {
             // Create New Asset(s)
-            // Use UUID or a robust generator here instead of Math.random
             const newAssets: Asset[] = data.bulkItems.map((item, index) => {
                 const generatedId = `AST-${new Date().getFullYear()}${String(new Date().getMonth()+1).padStart(2,'0')}-${String(Math.floor(Math.random()*10000)).padStart(4,'0')}-${index}`;
 
@@ -350,6 +352,9 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
                         referenceId: data.relatedRequestId || undefined
                     }],
                     woRoIntNumber: data.relatedRequestId,
+                    // --- FIX: Include Measurement Balances
+                    initialBalance: item.initialBalance,
+                    currentBalance: item.currentBalance,
                 };
             });
 

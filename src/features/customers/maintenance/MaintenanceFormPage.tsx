@@ -42,6 +42,7 @@ const MaintenanceFormPage: React.FC<MaintenanceManagementPageProps> = (props) =>
     const assets = useAssetStore((state) => state.assets);
     const assetCategories = useAssetStore((state) => state.categories);
     const updateAsset = useAssetStore((state) => state.updateAsset);
+    const consumeMaterials = useAssetStore((state) => state.consumeMaterials); // USE NEW ACTION
     
     const customers = useMasterDataStore((state) => state.customers);
     const updateCustomer = useMasterDataStore((state) => state.updateCustomer);
@@ -191,68 +192,17 @@ const MaintenanceFormPage: React.FC<MaintenanceManagementPageProps> = (props) =>
 
             // 3. Update Stock & Customer Data
             if (materialsToInstall.length > 0) {
-                // a. Consume Stock
-                for (const mat of materialsToInstall) {
-                    // Check if measurement type
-                    let isMeasurement = false;
-                    for (const cat of assetCategories) {
-                        for (const type of cat.types) {
-                            const model = type.standardItems?.find(i => i.name === mat.itemName && i.brand === mat.brand);
-                            if (model && model.bulkType === 'measurement') {
-                                isMeasurement = true;
-                            }
-                        }
-                    }
+                // a. Consume Stock via Store Action
+                const result = await consumeMaterials(
+                     materialsToInstall,
+                     { 
+                         customerId: maintenanceData.customerId, 
+                         location: `Terpasang di: ${maintenanceData.customerName}` 
+                     }
+                );
 
-                    const availableStock = assets
-                        .filter(a => 
-                            a.name === mat.itemName && 
-                            a.brand === mat.brand && 
-                            a.status === AssetStatus.IN_STORAGE
-                        )
-                        .sort((a, b) => new Date(a.registrationDate).getTime() - new Date(b.registrationDate).getTime());
-
-                    if (isMeasurement) {
-                        // MEASUREMENT LOGIC
-                        let remainingNeed = mat.quantity;
-                        for (const asset of availableStock) {
-                            if (remainingNeed <= 0) break;
-                            const currentBalance = asset.currentBalance ?? asset.initialBalance ?? 0;
-                            if (currentBalance <= 0) continue;
-
-                            if (currentBalance > remainingNeed) {
-                                const newBalance = currentBalance - remainingNeed;
-                                await updateAsset(asset.id, {
-                                    currentBalance: newBalance,
-                                    status: AssetStatus.IN_STORAGE, // Keep in storage
-                                    activityLog: []
-                                });
-                                remainingNeed = 0;
-                            } else {
-                                const consumed = currentBalance;
-                                remainingNeed -= consumed;
-                                await updateAsset(asset.id, {
-                                    currentBalance: 0,
-                                    status: AssetStatus.CONSUMED, // Mark as empty
-                                    activityLog: []
-                                });
-                            }
-                        }
-                    } else {
-                        // COUNT LOGIC
-                        const qtyToConsume = Math.min(mat.quantity, availableStock.length);
-                        if (qtyToConsume > 0) {
-                            const itemsToUpdate = availableStock.slice(0, qtyToConsume);
-                            for (const item of itemsToUpdate) {
-                                await updateAsset(item.id, {
-                                    status: AssetStatus.IN_USE,
-                                    currentUser: maintenanceData.customerId,
-                                    location: `Terpasang di: ${maintenanceData.customerName}`,
-                                    activityLog: [] 
-                                });
-                            }
-                        }
-                    }
+                if (result.warnings.length > 0) {
+                    result.warnings.forEach(w => addNotification(w, 'warning'));
                 }
 
                 // b. Update Customer Record

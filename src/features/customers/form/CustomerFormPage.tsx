@@ -32,6 +32,7 @@ const CustomerFormPage: React.FC<CustomerFormPageProps> = (props) => {
     const assets = useAssetStore((state) => state.assets);
     const assetCategories = useAssetStore((state) => state.categories);
     const updateAsset = useAssetStore((state) => state.updateAsset);
+    const consumeMaterials = useAssetStore((state) => state.consumeMaterials); // USE NEW ACTION
     
     const customerToEdit = useMemo(() => {
         if (pageInitialState?.customerId) {
@@ -42,94 +43,6 @@ const CustomerFormPage: React.FC<CustomerFormPageProps> = (props) => {
 
     const isEditing = !!customerToEdit;
     const addNotification = useNotification();
-
-    // Helper function untuk memproses konsumsi material (UPDATED LOGIC V2 - Measurement Support)
-    const processMaterialConsumption = async (materials: InstalledMaterial[], customerId: string, customerAddress: string) => {
-        for (const mat of materials) {
-            // 1. Identifikasi Tipe Material dari Model (StandardItem)
-            let isMeasurement = false;
-            
-            // Cari definisi Model di kategori
-            for (const cat of assetCategories) {
-                for (const type of cat.types) {
-                    const model = type.standardItems?.find(i => i.name === mat.itemName && i.brand === mat.brand);
-                    if (model) {
-                        isMeasurement = model.bulkType === 'measurement';
-                        break;
-                    }
-                }
-                if (isMeasurement) break;
-            }
-
-            // 2. Cari stok tersedia (FIFO - First In First Out)
-            const availableStock = assets
-                .filter(a => 
-                    a.name === mat.itemName && 
-                    a.brand === mat.brand && 
-                    a.status === AssetStatus.IN_STORAGE
-                )
-                .sort((a, b) => new Date(a.registrationDate).getTime() - new Date(b.registrationDate).getTime());
-
-            if (isMeasurement) {
-                // --- LOGIKA PENGUKURAN (MEASUREMENT) ---
-                let remainingNeed = mat.quantity; // Jumlah yang dibutuhkan
-                
-                for (const asset of availableStock) {
-                    if (remainingNeed <= 0) break;
-
-                    // Gunakan currentBalance. Jika undefined, gunakan initialBalance atau 0
-                    const currentBalance = asset.currentBalance ?? asset.initialBalance ?? 0;
-                    
-                    if (currentBalance <= 0) continue; 
-
-                    if (currentBalance > remainingNeed) {
-                        // KASUS A: Stok di aset ini CUKUP (Partial Use)
-                        // PENTING: Status TETAP 'IN_STORAGE' agar tidak hilang dari tabel stok
-                        const newBalance = currentBalance - remainingNeed;
-                        
-                        await updateAsset(asset.id, {
-                            currentBalance: newBalance,
-                            status: AssetStatus.IN_STORAGE, // Force keep in storage
-                            activityLog: [] 
-                        });
-                        
-                        remainingNeed = 0; 
-                    } else {
-                        // KASUS B: Stok di aset ini HABIS (Full Use of this specific asset ID)
-                        const consumed = currentBalance;
-                        remainingNeed -= consumed;
-                        
-                        await updateAsset(asset.id, {
-                            currentBalance: 0,
-                            status: AssetStatus.CONSUMED, // Tandai HABIS (Keluar dari stok aktif)
-                            activityLog: []
-                        });
-                    }
-                }
-
-                if (remainingNeed > 0) {
-                    addNotification(`Peringatan: Stok fisik ${mat.itemName} kurang ${remainingNeed} ${mat.unit}.`, 'warning');
-                }
-
-            } else {
-                // --- LOGIKA PERHITUNGAN BIASA (COUNT) ---
-                // Pindah status fisik ke IN_USE (Pelanggan)
-                const quantityToConsume = Math.min(mat.quantity, availableStock.length);
-
-                if (quantityToConsume > 0) {
-                    const itemsToUpdate = availableStock.slice(0, quantityToConsume);
-                    for (const item of itemsToUpdate) {
-                        await updateAsset(item.id, {
-                            status: AssetStatus.IN_USE, 
-                            currentUser: customerId,
-                            location: `Terpasang di: ${customerAddress}`,
-                            activityLog: [] 
-                        });
-                    }
-                }
-            }
-        }
-    };
 
     const handleSaveCustomer = async (
         formData: Omit<Customer, 'activityLog'>,
@@ -172,7 +85,15 @@ const CustomerFormPage: React.FC<CustomerFormPageProps> = (props) => {
             const newMaterials = formData.installedMaterials.filter(m => m.installationDate.startsWith(today));
             
             if (newMaterials.length > 0) {
-                await processMaterialConsumption(newMaterials, targetCustomerId, formData.address);
+                // Use Centralized Logic
+                const result = await consumeMaterials(newMaterials, {
+                    customerId: targetCustomerId,
+                    location: `Terpasang di: ${formData.address}`
+                });
+
+                if (result.warnings.length > 0) {
+                    result.warnings.forEach(w => addNotification(w, 'warning'));
+                }
             }
         }
 

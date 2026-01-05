@@ -271,8 +271,12 @@ export const useRegistrationForm = ({
         let finalBulkItems = formData.bulkItems;
         const isBulkTracking = selectedType?.trackingMethod === 'bulk';
         
-        // --- NEW LOGIC: Check Model Configuration first for bulk behavior ---
-        const isMeasurementType = isBulkTracking && selectedModel?.bulkType === 'measurement';
+        // --- NEW LOGIC: Dynamic Config Lookup ---
+        // Mencari konfigurasi model terbaru dari state, bukan hanya mengandalkan selectedModel memo
+        // Ini penting karena selectedModel mungkin belum sync jika formData baru saja di-set dari prefill
+        const targetModel = availableModels.find(m => m.name === formData.assetName && m.brand === formData.brand) || selectedModel;
+        
+        const isMeasurementType = isBulkTracking && targetModel?.bulkType === 'measurement';
 
         // 1. Validation Logic
         if (!formData.categoryId || !formData.typeId) {
@@ -289,9 +293,13 @@ export const useRegistrationForm = ({
              // --- CRITICAL FIX START: MEASUREMENT LOGIC INTEGRATION ---
              // Jika tipe adalah measurement (Kabel), kita buat N item terpisah.
              // Di sini kita MASUKKAN data saldo awal (initialBalance) sesuai konfigurasi Model.
-             // Ini memastikan saat Instalasi, saldo bisa dikurangi.
              if (isMeasurementType) {
-                 const baseBalance = selectedModel?.quantityPerUnit || 0; // e.g., 1000 (Meter)
+                 const baseBalance = targetModel?.quantityPerUnit || 0; // e.g., 1000 (Meter)
+
+                 if (baseBalance <= 0) {
+                     addNotification('Konfigurasi Model tidak valid: Isi per Unit (Meter) belum diatur di Master Data.', 'error');
+                     return;
+                 }
 
                  finalBulkItems = Array.from({ length: Number(formData.quantity) }, () => ({
                      id: generateUUID(), 
@@ -315,8 +323,7 @@ export const useRegistrationForm = ({
              }
         }
         
-        // Simpan data, perluasan type pada `bulkItems` akan ditangani di useAssetStore.addAsset
-        // dengan melakukan merge/sanitize
+        // Simpan data
         const finalData: RegistrationFormData = {
             ...formData,
             bulkItems: finalBulkItems,
@@ -332,7 +339,7 @@ export const useRegistrationForm = ({
         updateField,
         selectedCategory,
         selectedType,
-        selectedModel, // Export selectedModel
+        selectedModel,
         availableModels,
         handleCategoryChange,
         handleTypeChange,

@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { User, Installation, AssetStatus, InstallationAsset, Division } from '../../../../types';
+import { User, Installation, InstallationAsset } from '../../../../types';
 import { useNotification } from '../../../../providers/NotificationProvider';
 import { CustomSelect } from '../../../../components/ui/CustomSelect';
 import DatePicker from '../../../../components/ui/DatePicker';
@@ -12,11 +12,16 @@ import { SignatureStamp } from '../../../../components/ui/SignatureStamp';
 import { TrashIcon } from '../../../../components/icons/TrashIcon';
 import { PlusIcon } from '../../../../components/icons/PlusIcon';
 import { PencilIcon } from '../../../../components/icons/PencilIcon';
+import { ArchiveBoxIcon } from '../../../../components/icons/ArchiveBoxIcon';
 import { useCustomerAssetLogic } from '../../hooks/useCustomerAssetLogic';
 
 // Stores
 import { useMasterDataStore } from '../../../../stores/useMasterDataStore';
 import { useTransactionStore } from '../../../../stores/useTransactionStore';
+import { useAssetStore } from '../../../../stores/useAssetStore'; // Added to pass to Modal
+
+// Components
+import { MaterialAllocationModal } from '../../../../components/ui/MaterialAllocationModal';
 
 interface InstallationFormProps {
     currentUser: User;
@@ -33,6 +38,7 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
     const users = useMasterDataStore(state => state.users);
     const divisions = useMasterDataStore(state => state.divisions);
     const installations = useTransactionStore(state => state.installations);
+    const assets = useAssetStore(state => state.assets); // Needed for modal
 
     const [installationDate, setInstallationDate] = useState<Date | null>(new Date());
     const [docNumber, setDocNumber] = useState('');
@@ -43,7 +49,18 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
     const [selectedCustomerId, setSelectedCustomerId] = useState(prefillCustomerId || '');
     
     const [assetsInstalled, setAssetsInstalled] = useState<InstallationAsset[]>([]);
-    const [materialsUsed, setMaterialsUsed] = useState<{ id: number; modelKey: string; quantity: number | ''; unit: string; }[]>([]);
+    
+    // UPDATED: Added materialAssetId to state
+    type MaterialItemState = { 
+        id: number; 
+        modelKey: string; 
+        quantity: number | ''; 
+        unit: string; 
+        materialAssetId?: string; // Optional specific ID
+    };
+
+    const [materialsUsed, setMaterialsUsed] = useState<MaterialItemState[]>([]);
+
     const [notes, setNotes] = useState('');
 
     const [isLoading, setIsLoading] = useState(false);
@@ -51,6 +68,14 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
     const [isFooterVisible, setIsFooterVisible] = useState(true);
     const formId = "installation-form";
     const addNotification = useNotification();
+
+    // Allocation Modal State
+    const [allocationModal, setAllocationModal] = useState<{
+        isOpen: boolean;
+        itemIndex: number | null;
+        itemName: string;
+        brand: string;
+    }>({ isOpen: false, itemIndex: null, itemName: '', brand: '' });
 
     const technicianOptions = useMemo(() => users.filter(u => u.divisionId === 3).map(u => ({ value: u.name, label: u.name })), [users]);
     const customerOptions = useMemo(() => customers.map(c => ({ value: c.id, label: `${c.name} (${c.id})` })), [customers]);
@@ -74,28 +99,37 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
 
     useEffect(() => {
         if (materialsUsed.length === 0) { 
+            // UPDATED: Default names must match StandardItem names in mockData exactly
             const requiredMaterials = [
-                { name: 'Kabel Dropcore 1 Core 150m', brand: 'FiberHome', defaultQty: 50 },
-                { name: 'Kabel UTP Cat6 305m', brand: 'Belden', defaultQty: 10 },
+                { name: 'Dropcore 1 Core', brand: 'FiberHome', defaultQty: 50 },
+                { name: 'Kabel UTP Cat6', brand: 'Belden', defaultQty: 10 },
                 { name: 'Patchcord SC-UPC 3M', brand: 'Generic', defaultQty: 2 },
                 { name: 'Adaptor 12V 1A', brand: 'Generic', defaultQty: 1 }
             ];
     
             const defaultMaterials = requiredMaterials
-                .map((mat, index) => {
+                .map((mat, index): MaterialItemState | null => {
                     const modelKey = `${mat.name}|${mat.brand}`;
-                    const option = materialOptions.find(opt => opt.value === modelKey);
+                    // Try exact match first
+                    let option = materialOptions.find(opt => opt.value === modelKey);
+                    
+                    // Fallback fuzzy matching if exact fails (e.g. slight naming diff)
+                    if (!option) {
+                         option = materialOptions.find(opt => opt.label.includes(mat.name) && opt.label.includes(mat.brand));
+                    }
+
                     if (option) {
                         return {
                             id: Date.now() + index,
-                            modelKey: modelKey,
+                            modelKey: option.value, // Use the correct key from options
                             quantity: mat.defaultQty,
-                            unit: option.unit
+                            unit: option.unit,
+                            materialAssetId: undefined
                         };
                     }
                     return null;
                 })
-                .filter((m): m is { id: number; modelKey: string; quantity: number; unit: string; } => m !== null);
+                .filter((m): m is MaterialItemState => m !== null);
             
             setMaterialsUsed(defaultMaterials);
         }
@@ -132,7 +166,7 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
     };
 
     const handleAddMaterial = () => {
-        setMaterialsUsed(prev => [...prev, { id: Date.now(), modelKey: '', quantity: 1, unit: 'pcs' }]);
+        setMaterialsUsed(prev => [...prev, { id: Date.now(), modelKey: '', quantity: 1, unit: 'pcs', materialAssetId: undefined }]);
     };
     const handleRemoveMaterial = (id: number) => {
         setMaterialsUsed(prev => prev.filter(m => m.id !== id));
@@ -144,6 +178,7 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
                 if (field === 'modelKey') {
                     const model = materialOptions.find(opt => opt.value === value);
                     updatedItem.unit = model?.unit || 'pcs';
+                    updatedItem.materialAssetId = undefined; // Reset specific selection on model change
                 }
                 return updatedItem;
             }
@@ -151,6 +186,29 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
         }));
     };
     
+    // --- Manual Allocation Logic ---
+    const handleOpenAllocationModal = (index: number, modelKey: string) => {
+        if (!modelKey) return;
+        const [name, brand] = modelKey.split('|');
+        setAllocationModal({
+            isOpen: true,
+            itemIndex: index,
+            itemName: name,
+            brand: brand
+        });
+    };
+
+    const handleAllocationSelect = (assetId: string) => {
+        if (allocationModal.itemIndex !== null) {
+            setMaterialsUsed(prev => prev.map((item, idx) => {
+                if (idx === allocationModal.itemIndex) {
+                    return { ...item, materialAssetId: assetId };
+                }
+                return item;
+            }));
+        }
+    };
+
     // Handler for manual Doc Number edit
     const handleDocNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         setDocNumber(e.target.value.toUpperCase());
@@ -179,7 +237,7 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
             .map(m => {
                 const [name, brand] = m.modelKey.split('|');
                 return { 
-                    materialAssetId: undefined, // Will be handled by backend logic for bulk
+                    materialAssetId: m.materialAssetId, // Pass specific ID if selected
                     itemName: name, 
                     brand: brand, 
                     quantity: Number(m.quantity), 
@@ -315,14 +373,36 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
                     <div className="p-4 mt-4 border rounded-lg bg-gray-50/50">
                         <h5 className="font-semibold text-gray-700 mb-2">Material Terpakai</h5>
                         <div className="space-y-3">
-                            {materialsUsed.map(material => (
-                                <div key={material.id} className="grid grid-cols-12 gap-2 items-center">
-                                    <div className="col-span-6"><CustomSelect options={materialOptions} value={material.modelKey} onChange={v => handleMaterialChange(material.id, 'modelKey', v)} isSearchable placeholder="Pilih material..."/></div>
-                                    <div className="col-span-4 relative">
+                            {materialsUsed.map((material, index) => (
+                                <div key={material.id} className="grid grid-cols-12 gap-2 items-start">
+                                    <div className="col-span-5">
+                                        <CustomSelect options={materialOptions} value={material.modelKey} onChange={v => handleMaterialChange(material.id, 'modelKey', v)} isSearchable placeholder="Pilih material..."/>
+                                        {material.materialAssetId && (
+                                            <p className="text-[10px] text-blue-600 mt-1 font-mono">Sumber: {material.materialAssetId}</p>
+                                        )}
+                                    </div>
+                                    <div className="col-span-3 relative">
                                         <input type="number" value={material.quantity} onChange={e => handleMaterialChange(material.id, 'quantity', e.target.value)} min="1" className="block w-full px-3 py-2 pr-12 text-sm text-gray-900 bg-white border border-gray-300 rounded-lg shadow-sm" placeholder="Jumlah"/>
                                         <span className="absolute inset-y-0 right-0 flex items-center pr-3 text-sm text-gray-500 pointer-events-none">{material.unit}</span>
                                     </div>
-                                    <div className="col-span-2"><button type="button" onClick={() => handleRemoveMaterial(material.id)} className="w-full h-10 flex items-center justify-center text-red-500 bg-white border rounded-lg shadow-sm hover:bg-red-50"><TrashIcon className="w-5 h-5"/></button></div>
+                                    <div className="col-span-3">
+                                         {/* Source Selection Button */}
+                                         <button 
+                                            type="button" 
+                                            onClick={() => handleOpenAllocationModal(index, material.modelKey)}
+                                            disabled={!material.modelKey}
+                                            className={`w-full h-10 px-2 text-xs font-semibold rounded-lg border flex items-center justify-center gap-1 transition-colors
+                                                ${material.materialAssetId 
+                                                    ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' 
+                                                    : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                                                } ${!material.modelKey ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                            title="Pilih sumber stok spesifik (Drum/Box)"
+                                        >
+                                            <ArchiveBoxIcon className="w-3.5 h-3.5" />
+                                            {material.materialAssetId ? 'Ubah' : 'Sumber'}
+                                        </button>
+                                    </div>
+                                    <div className="col-span-1"><button type="button" onClick={() => handleRemoveMaterial(material.id)} className="w-full h-10 flex items-center justify-center text-red-500 bg-white border rounded-lg shadow-sm hover:bg-red-50"><TrashIcon className="w-5 h-5"/></button></div>
                                 </div>
                             ))}
                         </div>
@@ -361,6 +441,23 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
              <FloatingActionBar isVisible={!isFooterVisible}>
                 <ActionButtons formId={formId} />
             </FloatingActionBar>
+            
+            {/* Allocation Modal */}
+            {allocationModal.isOpen && (
+                <MaterialAllocationModal 
+                    isOpen={allocationModal.isOpen}
+                    onClose={() => setAllocationModal(prev => ({ ...prev, isOpen: false }))}
+                    itemName={allocationModal.itemName}
+                    brand={allocationModal.brand}
+                    assets={assets}
+                    onSelect={handleAllocationSelect}
+                    currentSelectedId={
+                        allocationModal.itemIndex !== null 
+                        ? materialsUsed[allocationModal.itemIndex]?.materialAssetId 
+                        : undefined
+                    }
+                />
+            )}
         </>
     );
 };

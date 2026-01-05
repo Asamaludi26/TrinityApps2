@@ -283,7 +283,6 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
                 const initialContent = asset.initialBalance || 0;
 
                 if (current.isMeasurement) {
-                    // Grand Total is sum of what we BOUGHT (Initial Capacity)
                     current.grandTotalBalance += initialContent;
                 }
 

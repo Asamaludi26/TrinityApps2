@@ -98,10 +98,10 @@ export const initialAssetCategories: AssetCategory[] = [
                     name: 'Dropcore 1 Core', 
                     brand: 'FiberHome',
                     bulkType: 'measurement',
-                    // Definisi level Model (Spesifik)
+                    // Definisi level Model (Spesifik) - PENTING: quantityPerUnit menentukan isi
                     unitOfMeasure: 'Hasbal',
                     baseUnitOfMeasure: 'Meter',
-                    quantityPerUnit: 1000
+                    quantityPerUnit: 1000 
                 }] 
             },
             { 
@@ -165,6 +165,24 @@ export const mockAssets: Asset[] = [
         purchasePrice: 1500, 
         initialBalance: 1000, 
         currentBalance: 850, 
+        attachments: [], 
+        activityLog: [] 
+    },
+    // ADDED: Backup Asset for MAT-001
+    { 
+        id: 'MAT-003', 
+        name: 'Dropcore 1 Core', 
+        category: 'Infrastruktur Fiber Optik', 
+        type: 'Kabel Dropcore', 
+        brand: 'FiberHome', 
+        status: AssetStatus.IN_STORAGE, 
+        condition: AssetCondition.BRAND_NEW, 
+        location: 'Gudang Kabel - Rak B', 
+        registrationDate: d(-5), 
+        recordedBy: 'Admin Logistik', 
+        purchasePrice: 1600, 
+        initialBalance: 1000, 
+        currentBalance: 1000, // Full New Drum
         attachments: [], 
         activityLog: [] 
     },

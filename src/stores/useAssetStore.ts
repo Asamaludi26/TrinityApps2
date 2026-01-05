@@ -1,14 +1,14 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { Asset, AssetCategory, StockMovement, MovementType, ActivityLogEntry } from '../types';
+import { Asset, AssetCategory, StockMovement, MovementType, ActivityLogEntry, AssetStatus } from '../types';
 import * as api from '../services/api';
 
 interface AssetState {
   assets: Asset[];
   categories: AssetCategory[];
   stockMovements: StockMovement[];
-  thresholds: Record<string, number>; // State untuk ambang batas
+  thresholds: Record<string, number>; 
   isLoading: boolean;
 
   // Actions
@@ -19,11 +19,17 @@ interface AssetState {
   deleteAsset: (id: string) => Promise<void>;
   
   updateCategories: (categories: AssetCategory[]) => Promise<void>;
-  updateThresholds: (thresholds: Record<string, number>) => void; // Aksi untuk update ambang batas
+  updateThresholds: (thresholds: Record<string, number>) => void; 
 
   recordMovement: (movement: Omit<StockMovement, 'id' | 'balanceAfter'>) => Promise<void>;
   getStockHistory: (name: string, brand: string) => StockMovement[];
   refreshAll: () => Promise<void>;
+
+  // CENTRALIZED LOGIC: Consume Stock (Installation/Maintenance)
+  consumeMaterials: (
+      materials: { materialAssetId?: string, itemName: string, brand: string, quantity: number, unit: string }[],
+      context: { customerId?: string, location?: string }
+  ) => Promise<{ success: boolean; warnings: string[] }>;
 }
 
 const sanitizeBulkAsset = (asset: Asset | Partial<Asset>, categories: AssetCategory[], existingAsset?: Asset): Asset | Partial<Asset> => {
@@ -44,7 +50,7 @@ export const useAssetStore = create<AssetState>()(
       assets: [],
       categories: [],
       stockMovements: [],
-      thresholds: {}, // Nilai awal
+      thresholds: {}, 
       isLoading: false,
 
       refreshAll: async () => {
@@ -67,12 +73,8 @@ export const useAssetStore = create<AssetState>()(
       },
 
       addAsset: async (rawAsset) => {
-        // FIX: Ensure bulk properties (balances) are preserved if passed from form
         const asset = sanitizeBulkAsset(rawAsset, get().categories) as Asset;
         
-        // Manual assignment needed if sanitize strips them or if Typescript complains, 
-        // but here rawAsset is spread so it should be fine. 
-        // Just enforcing correctness:
         if ((rawAsset as any).initialBalance !== undefined) {
              asset.initialBalance = (rawAsset as any).initialBalance;
              asset.currentBalance = (rawAsset as any).currentBalance;
@@ -184,6 +186,131 @@ export const useAssetStore = create<AssetState>()(
           return get().stockMovements
             .filter(m => m.assetName === name && m.brand === brand)
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      },
+
+      // --- CENTRALIZED CONSUMPTION LOGIC (REFACTORED FOR ATOMICITY) ---
+      consumeMaterials: async (materials, context) => {
+          const { assets, categories } = get();
+          const warnings: string[] = [];
+          
+          // Pending Updates Buffer (Simulation of Transaction)
+          // Stores { assetId: { changes } }
+          const pendingUpdates: Record<string, Partial<Asset>> = {};
+
+          for (const mat of materials) {
+              // 1. Identify Model Config (Measurement vs Count)
+              let isMeasurement = false;
+              for (const cat of categories) {
+                  for (const type of cat.types) {
+                      const model = type.standardItems?.find(i => i.name === mat.itemName && i.brand === mat.brand);
+                      if (model && model.bulkType === 'measurement') {
+                          isMeasurement = true;
+                          break;
+                      }
+                  }
+                  if (isMeasurement) break;
+              }
+
+              // 2. Select Source Assets
+              let targetAssets: Asset[] = [];
+              
+              if (mat.materialAssetId) {
+                  const specificAsset = assets.find(a => a.id === mat.materialAssetId);
+                  if (specificAsset && specificAsset.status === AssetStatus.IN_STORAGE) {
+                      targetAssets = [specificAsset];
+                  } else {
+                       warnings.push(`ID Aset spesifik ${mat.materialAssetId} tidak tersedia. Mencoba alokasi otomatis.`);
+                  }
+              }
+              
+              if (targetAssets.length === 0) {
+                  targetAssets = assets
+                      .filter(a => 
+                          a.name === mat.itemName && 
+                          a.brand === mat.brand && 
+                          a.status === AssetStatus.IN_STORAGE
+                      )
+                      .sort((a, b) => new Date(a.registrationDate).getTime() - new Date(b.registrationDate).getTime());
+              }
+
+              // 3. Logic Execution (Updates pendingUpdates, NOT store yet)
+              if (isMeasurement) {
+                  let remainingNeed = mat.quantity;
+                  
+                  for (const asset of targetAssets) {
+                      if (remainingNeed <= 0) break;
+
+                      // Use current balance, fallback to initial, default 0
+                      // Check if we already have a pending update for this asset
+                      const currentPending = pendingUpdates[asset.id];
+                      
+                      const effectiveBalance = currentPending?.currentBalance !== undefined 
+                           ? currentPending.currentBalance 
+                           : (asset.currentBalance ?? asset.initialBalance ?? 0);
+
+                      if (effectiveBalance <= 0) continue;
+
+                      if (effectiveBalance > remainingNeed) {
+                          // Partial Use
+                          pendingUpdates[asset.id] = {
+                              ...pendingUpdates[asset.id],
+                              currentBalance: effectiveBalance - remainingNeed,
+                              status: AssetStatus.IN_STORAGE
+                          };
+                          remainingNeed = 0;
+                      } else {
+                          // Full Use of Drum
+                          pendingUpdates[asset.id] = {
+                              ...pendingUpdates[asset.id],
+                              currentBalance: 0,
+                              status: AssetStatus.CONSUMED
+                          };
+                          remainingNeed -= effectiveBalance;
+                      }
+                  }
+
+                  if (remainingNeed > 0) {
+                      warnings.push(`Stok fisik ${mat.itemName} kurang ${remainingNeed} ${mat.unit}.`);
+                  }
+
+              } else {
+                  // --- LOGIC COUNT (Konektor) ---
+                  const qtyToConsume = Math.min(mat.quantity, targetAssets.length);
+                  
+                  if (qtyToConsume > 0) {
+                      const itemsToUpdate = targetAssets.slice(0, qtyToConsume);
+                      for (const item of itemsToUpdate) {
+                          pendingUpdates[item.id] = {
+                              ...pendingUpdates[item.id],
+                              status: AssetStatus.IN_USE,
+                              currentUser: context.customerId || null,
+                              location: context.location || 'Digunakan'
+                          };
+                      }
+                  }
+
+                  if (qtyToConsume < mat.quantity) {
+                       warnings.push(`Stok fisik ${mat.itemName} kurang ${mat.quantity - qtyToConsume} ${mat.unit}.`);
+                  }
+              }
+          }
+          
+          // 4. COMMIT PHASE
+          // Apply all pending updates to the store in one go
+          if (Object.keys(pendingUpdates).length > 0) {
+             const currentAssets = get().assets;
+             const updatedAssets = currentAssets.map(a => {
+                 if (pendingUpdates[a.id]) {
+                     return { ...a, ...pendingUpdates[a.id] };
+                 }
+                 return a;
+             });
+             
+             await api.updateData('app_assets', updatedAssets);
+             set({ assets: updatedAssets });
+          }
+          
+          return { success: true, warnings };
       }
     }),
     {
@@ -191,7 +318,7 @@ export const useAssetStore = create<AssetState>()(
         storage: createJSONStorage(() => localStorage),
         partialize: (state) => ({ 
             categories: state.categories,
-            thresholds: state.thresholds // Simpan thresholds
+            thresholds: state.thresholds 
         }),
     }
   )

@@ -13,7 +13,12 @@ import { AssetIcon } from '../../../components/icons/AssetIcon';
 import { InboxIcon } from '../../../components/icons/InboxIcon';
 import { PlusIcon } from '../../../components/icons/PlusIcon';
 import { TrashIcon } from '../../../components/icons/TrashIcon';
+import { ArchiveBoxIcon } from '../../../components/icons/ArchiveBoxIcon'; 
 import { useCustomerAssetLogic } from '../hooks/useCustomerAssetLogic';
+import { generateUUID } from '../../../utils/uuid'; // IMPORTED UUID
+
+// Components
+import { MaterialAllocationModal } from '../../../components/ui/MaterialAllocationModal'; 
 
 interface CustomerFormProps {
     customer: Customer | null;
@@ -44,10 +49,11 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
     const { installableAssets, materialOptions } = useCustomerAssetLogic();
 
     type MaterialFormItem = {
-        tempId: number;
+        tempId: string; // Changed from number to string for UUID
         modelKey: string; // Format: "itemName|brand"
         quantity: number | '';
         unit: string;
+        materialAssetId?: string; 
     };
 
     // State Fields
@@ -69,6 +75,14 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
     const [initialAssignedAssetIds, setInitialAssignedAssetIds] = useState<string[]>([]);
     const [assignedAssetIds, setAssignedAssetIds] = useState<string[]>([]);
     const [materials, setMaterials] = useState<MaterialFormItem[]>([]);
+
+    // Allocation Modal State
+    const [allocationModal, setAllocationModal] = useState<{
+        isOpen: boolean;
+        itemIndex: number | null;
+        itemName: string;
+        brand: string;
+    }>({ isOpen: false, itemIndex: null, itemName: '', brand: '' });
 
     const [isLoading, setIsLoading] = useState(false);
     const footerRef = useRef<HTMLDivElement>(null);
@@ -98,11 +112,12 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
             setInitialAssignedAssetIds(currentAssets);
             setAssignedAssetIds(currentAssets);
 
-            setMaterials((customer.installedMaterials || []).map((m, i) => ({
-                tempId: Date.now() + i,
+            setMaterials((customer.installedMaterials || []).map((m) => ({
+                tempId: generateUUID(), // Always generate fresh UUIDs for edit session
                 modelKey: `${m.itemName}|${m.brand}`,
                 quantity: m.quantity,
                 unit: m.unit,
+                materialAssetId: m.materialAssetId 
             })));
         } else {
             // MODE NEW: Reset & Auto-populate Standard Materials
@@ -111,29 +126,23 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
             setStatus(CustomerStatus.ACTIVE); setInstallationDate(new Date()); setServicePackage('');
             setInitialAssignedAssetIds([]); setAssignedAssetIds([]);
             
-            // LOGIKA AUTO-POPULATE MATERIAL
-            // Mencari item di master data (materialOptions) yang cocok dengan keyword standar
             const standardMaterialKeywords = ['Dropcore', 'Patch', 'Adaptor', 'Sleeve'];
-            
             const defaultMaterials: MaterialFormItem[] = [];
             
             if (materialOptions.length > 0) {
-                standardMaterialKeywords.forEach((keyword, idx) => {
-                    // Cari opsi yang labelnya mengandung keyword (case insensitive)
+                standardMaterialKeywords.forEach((keyword) => {
                     const match = materialOptions.find(opt => opt.label.toLowerCase().includes(keyword.toLowerCase()));
-                    
                     if (match) {
                         defaultMaterials.push({
-                            tempId: Date.now() + idx,
+                            tempId: generateUUID(), // Fix: Use UUID
                             modelKey: match.value,
-                            quantity: 0, // Default 0, user tinggal isi jumlah
-                            // FIX: Gunakan unit dari materialOptions (yang sudah diperbaiki logicnya), jangan hardcode 'pcs'
-                            unit: match.unit || 'Pcs' 
+                            quantity: 0, 
+                            unit: match.unit || 'Pcs',
+                            materialAssetId: undefined
                         });
                     }
                 });
             }
-
             setMaterials(defaultMaterials);
         }
     }, [customer, assets, materialOptions]);
@@ -232,25 +241,47 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
     };
     
     const handleAddMaterial = () => {
-        setMaterials(prev => [...prev, { tempId: Date.now(), modelKey: '', quantity: 1, unit: 'Pcs' }]);
+        setMaterials(prev => [...prev, { tempId: generateUUID(), modelKey: '', quantity: 1, unit: 'Pcs', materialAssetId: undefined }]);
     };
-    const handleRemoveMaterial = (tempId: number) => {
+    const handleRemoveMaterial = (tempId: string) => {
         setMaterials(prev => prev.filter(m => m.tempId !== tempId));
     };
     
-    const handleMaterialChange = (tempId: number, field: keyof MaterialFormItem, value: any) => {
+    const handleMaterialChange = (tempId: string, field: keyof MaterialFormItem, value: any) => {
         setMaterials(prev => prev.map(item => {
             if (item.tempId === tempId) {
                 const updatedItem = { ...item, [field]: value };
                 if (field === 'modelKey') {
-                    // FIX: Saat material dipilih, update unit otomatis dari opsi
                     const model = materialOptions.find(opt => opt.value === value);
                     updatedItem.unit = model?.unit || 'Pcs';
+                    updatedItem.materialAssetId = undefined;
                 }
                 return updatedItem;
             }
             return item;
         }));
+    };
+
+    const handleOpenAllocationModal = (index: number, modelKey: string) => {
+        if (!modelKey) return;
+        const [name, brand] = modelKey.split('|');
+        setAllocationModal({
+            isOpen: true,
+            itemIndex: index,
+            itemName: name,
+            brand: brand
+        });
+    };
+
+    const handleAllocationSelect = (assetId: string) => {
+        if (allocationModal.itemIndex !== null) {
+            setMaterials(prev => prev.map((item, idx) => {
+                if (idx === allocationModal.itemIndex) {
+                    return { ...item, materialAssetId: assetId };
+                }
+                return item;
+            }));
+        }
     };
 
     const handleSubmit = (e: React.FormEvent) => {
@@ -259,17 +290,24 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
             addNotification('Harap perbaiki data yang tidak valid pada formulir.', 'error');
             return;
         }
+        
+        // Strict Quantity Validation
+        if (materials.some(m => m.modelKey && (m.quantity === '' || m.quantity < 0 || isNaN(Number(m.quantity))))) {
+             addNotification('Jumlah material tidak valid.', 'error');
+             return;
+        }
+
         setIsLoading(true);
 
         const newlyAssigned = assignedAssetIds.filter(id => !initialAssignedAssetIds.includes(id));
         const unassigned = initialAssignedAssetIds.filter(id => !assignedAssetIds.includes(id));
         
-        // Filter material yang memiliki quantity > 0 agar tidak menyimpan data kosong
         const finalMaterials: InstalledMaterial[] = materials
             .filter(m => m.modelKey && m.quantity && Number(m.quantity) > 0)
             .map(m => {
                 const [name, brand] = m.modelKey.split('|');
                 return {
+                    materialAssetId: m.materialAssetId, 
                     itemName: name,
                     brand: brand,
                     quantity: Number(m.quantity),
@@ -278,7 +316,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
                 };
             });
 
-        setTimeout(() => { // Simulate API call
+        setTimeout(() => { 
             onSave({
                 id: customerId, 
                 name, address, phone, email, status,
@@ -310,7 +348,6 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
         <>
             <form id={formId} onSubmit={handleSubmit} className="space-y-4 pb-32">
                  <FormSection title="Informasi Kontak" icon={<UsersIcon className="w-6 h-6 mr-3 text-tm-primary" />}>
-                     {/* ID PELANGGAN FIELD */}
                      <div className="md:col-span-2">
                         <label htmlFor="customerId" className="block text-sm font-medium text-gray-700">ID Pelanggan</label>
                         <div className="mt-1 relative rounded-md shadow-sm">
@@ -429,8 +466,8 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
                         <p className="text-sm text-gray-600 mb-4">Daftar material instalasi standar. Isi jumlah yang digunakan.</p>
                         <div className="space-y-3">
                             {materials.map((material, index) => (
-                                <div key={material.tempId} className="relative grid grid-cols-1 md:grid-cols-12 gap-x-4 gap-y-2 p-3 bg-gray-100/60 border rounded-lg items-end">
-                                    <div className="md:col-span-6">
+                                <div key={material.tempId} className="grid grid-cols-1 md:grid-cols-12 gap-x-4 gap-y-2 p-3 bg-gray-100/60 border rounded-lg items-end">
+                                    <div className="md:col-span-5">
                                         <label className="block text-xs font-medium text-gray-500">Material</label>
                                         <CustomSelect 
                                             options={materialOptions} 
@@ -439,6 +476,9 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
                                             isSearchable
                                             placeholder="Pilih material..."
                                         />
+                                        {material.materialAssetId && (
+                                            <p className="text-[10px] text-blue-600 mt-1 font-mono">Sumber: {material.materialAssetId}</p>
+                                        )}
                                     </div>
                                     <div className="md:col-span-3">
                                         <label className="block text-xs font-medium text-gray-500">Jumlah</label>
@@ -451,12 +491,27 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
                                             placeholder="0"
                                         />
                                     </div>
-                                    <div className="md:col-span-2">
-                                        <label className="block text-xs font-medium text-gray-500">Satuan</label>
-                                        <input type="text" readOnly value={material.unit} className="block w-full px-3 py-2 mt-1 text-gray-700 bg-gray-200/60 border border-gray-300 rounded-lg shadow-sm" />
+                                     <div className="md:col-span-3">
+                                         {/* Source Selection Button (Consistent with InstallationForm) */}
+                                         <label className="block text-xs font-medium text-gray-500 opacity-0">Action</label>
+                                         <button 
+                                            type="button" 
+                                            onClick={() => handleOpenAllocationModal(index, material.modelKey)}
+                                            disabled={!material.modelKey}
+                                            className={`w-full mt-1 h-[38px] px-2 text-xs font-semibold rounded-lg border flex items-center justify-center gap-1 transition-colors
+                                                ${material.materialAssetId 
+                                                    ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' 
+                                                    : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                                                } ${!material.modelKey ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                            title="Pilih sumber stok spesifik (Drum/Box)"
+                                        >
+                                            <ArchiveBoxIcon className="w-3.5 h-3.5" />
+                                            {material.materialAssetId ? 'Ubah' : 'Sumber'}
+                                        </button>
                                     </div>
                                     <div className="md:col-span-1">
-                                        <button type="button" onClick={() => handleRemoveMaterial(material.tempId)} className="flex items-center justify-center w-full h-10 text-gray-500 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-red-100 hover:text-red-500">
+                                         <label className="block text-xs font-medium text-gray-500 opacity-0">Del</label>
+                                        <button type="button" onClick={() => handleRemoveMaterial(material.tempId)} className="flex items-center justify-center w-full h-[38px] mt-1 text-gray-500 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-red-100 hover:text-red-500">
                                             <TrashIcon className="w-5 h-5" />
                                         </button>
                                     </div>
@@ -479,6 +534,23 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
             <FloatingActionBar isVisible={!isFooterVisible}>
                 <ActionButtons formId={formId} />
             </FloatingActionBar>
+            
+            {/* Allocation Modal */}
+            {allocationModal.isOpen && (
+                <MaterialAllocationModal 
+                    isOpen={allocationModal.isOpen}
+                    onClose={() => setAllocationModal(prev => ({ ...prev, isOpen: false }))}
+                    itemName={allocationModal.itemName}
+                    brand={allocationModal.brand}
+                    assets={assets}
+                    onSelect={handleAllocationSelect}
+                    currentSelectedId={
+                        allocationModal.itemIndex !== null 
+                        ? materials[allocationModal.itemIndex]?.materialAssetId 
+                        : undefined
+                    }
+                />
+            )}
         </>
     );
 };
