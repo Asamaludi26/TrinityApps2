@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Dismantle, ItemStatus, Asset, AssetStatus, AssetCondition, Customer, User, PreviewData, Page } from '../../../types';
+import { Dismantle, ItemStatus, Asset, AssetStatus, AssetCondition, Customer, User, PreviewData, Page, CustomerStatus } from '../../../types';
 import { useNotification } from '../../../providers/NotificationProvider';
 import { useSortableData } from '../../../hooks/useSortableData';
 import { useGenericFilter } from '../../../hooks/useGenericFilter';
@@ -49,6 +49,7 @@ const DismantleFormPage: React.FC<DismantleFormPageProps> = (props) => {
     const assets = useAssetStore((state) => state.assets);
     const updateAsset = useAssetStore((state) => state.updateAsset);
     const customers = useMasterDataStore((state) => state.customers);
+    const updateCustomer = useMasterDataStore((state) => state.updateCustomer); // Needed for auto-update status
     const users = useMasterDataStore((state) => state.users);
     const storeUser = useAuthStore((state) => state.currentUser);
     const currentUser = storeUser || propUser;
@@ -147,6 +148,8 @@ const DismantleFormPage: React.FC<DismantleFormPageProps> = (props) => {
         setIsLoading(true);
         try {
             await updateDismantleStore(selectedDismantle.id, { status: ItemStatus.COMPLETED, acknowledger: currentUser.name });
+            
+            // 1. Update Asset Status (Back to Storage)
             await updateAsset(selectedDismantle.assetId, {
                 status: AssetStatus.IN_STORAGE,
                 condition: selectedDismantle.retrievedCondition,
@@ -155,9 +158,30 @@ const DismantleFormPage: React.FC<DismantleFormPageProps> = (props) => {
                 isDismantled: true,
                 dismantleInfo: { customerId: selectedDismantle.customerId, customerName: selectedDismantle.customerName, dismantleDate: selectedDismantle.dismantleDate, dismantleId: selectedDismantle.id }
             });
+
+            // 2. SMART LOGIC: Check Remaining Assets & Update Customer Status
+            // Logic: Jika sisa aset aktif (IN_USE) milik pelanggan ini adalah 0 (SETELAH aset ini ditarik/diupdate), 
+            // maka set status pelanggan jadi INACTIVE.
+            // Note: `updateAsset` di atas sudah dijalankan, tapi store mungkin belum fully re-rendered disini.
+            // Kita gunakan logic manual: Ambil semua aset user, filter yang status IN_USE, exclude ID aset yang baru saja ditarik.
+            const remainingAssets = assets.filter(a => 
+                a.currentUser === selectedDismantle.customerId && 
+                a.status === AssetStatus.IN_USE && 
+                a.id !== selectedDismantle.assetId
+            );
+
+            if (remainingAssets.length === 0) {
+                 await updateCustomer(selectedDismantle.customerId, { status: CustomerStatus.INACTIVE });
+                 addNotification('Status pelanggan otomatis diubah menjadi Non-Aktif karena tidak ada aset tersisa.', 'info');
+            }
+
             addNotification('Dismantle telah diselesaikan dan aset kembali ke stok.', 'success');
             handleSetView('list');
-        } catch (e) { addNotification('Gagal menyelesaikan dismantle.', 'error'); } finally { setIsLoading(false); }
+        } catch (e) { 
+            addNotification('Gagal menyelesaikan dismantle.', 'error'); 
+        } finally { 
+            setIsLoading(false); 
+        }
     };
     
     const handleConfirmDelete = async () => {

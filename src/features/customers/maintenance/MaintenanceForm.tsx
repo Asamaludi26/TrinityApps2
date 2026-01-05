@@ -12,9 +12,12 @@ import { Checkbox } from '../../../components/ui/Checkbox';
 import { generateDocumentNumber } from '../../../utils/documentNumberGenerator';
 import { CloseIcon } from '../../../components/icons/CloseIcon';
 import { PlusIcon } from '../../../components/icons/PlusIcon';
+import { ArchiveBoxIcon } from '../../../components/icons/ArchiveBoxIcon';
 import { useNotification } from '../../../providers/NotificationProvider';
 import { useCustomerAssetLogic } from '../hooks/useCustomerAssetLogic';
 import FloatingActionBar from '../../../components/ui/FloatingActionBar';
+import { MaterialAllocationModal } from '../../../components/ui/MaterialAllocationModal';
+import { BsBoxSeam, BsWrench, BsLightningFill } from 'react-icons/bs';
 
 interface MaintenanceFormProps {
     currentUser: User;
@@ -50,19 +53,31 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
     
     const [replacements, setReplacements] = useState<Record<string, Partial<MaintenanceReplacement>>>({});
     
-    type AdditionalMaterialItem = { id: number; modelKey: string; quantity: number | '' };
+    // UPDATED STATE TYPE
+    type AdditionalMaterialItem = { 
+        id: number; 
+        modelKey: string; 
+        quantity: number | '';
+        unit: string;
+        materialAssetId?: string;
+    };
     const [additionalMaterials, setAdditionalMaterials] = useState<AdditionalMaterialItem[]>([]);
     
     const [workTypeInput, setWorkTypeInput] = useState('');
     const workTypeInputRef = useRef<HTMLInputElement>(null);
     const addNotification = useNotification();
     
-    const [selectedMaterialKeys, setSelectedMaterialKeys] = useState<string[]>([]);
-    const [showNewMaterialSection, setShowNewMaterialSection] = useState(false);
-    
     const [isFooterVisible, setIsFooterVisible] = useState(true);
     const footerRef = useRef<HTMLDivElement>(null);
     const formId = "maintenance-form";
+
+    // Allocation Modal State
+    const [allocationModal, setAllocationModal] = useState<{
+        isOpen: boolean;
+        itemIndex: number | null;
+        itemName: string;
+        brand: string;
+    }>({ isOpen: false, itemIndex: null, itemName: '', brand: '' });
 
     // Filter Assets using hook
     const assetsForCustomer = useMemo(() => getCustomerAssets(selectedCustomerId), [selectedCustomerId, getCustomerAssets]);
@@ -106,7 +121,6 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
             setDocNumber('[Otomatis]');
             return;
         }
-        // Update Prefix ke WO-MT
         const newDocNumber = generateDocumentNumber('WO-MT', maintenances, maintenanceDate);
         setDocNumber(newDocNumber);
     }, [maintenanceDate, maintenances]);
@@ -188,8 +202,8 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
         }));
     };
     
-    const addAdditionalMaterial = (modelKey: string = '') => {
-        setAdditionalMaterials(prev => [...prev, { id: Date.now(), modelKey: modelKey, quantity: 1 }]);
+    const addAdditionalMaterial = () => {
+        setAdditionalMaterials(prev => [...prev, { id: Date.now(), modelKey: '', quantity: 1, unit: 'Pcs' }]);
     };
     
     const removeAdditionalMaterial = (id: number) => {
@@ -197,22 +211,44 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
     };
 
     const handleMaterialChange = (id: number, field: keyof AdditionalMaterialItem, value: any) => {
-        setAdditionalMaterials(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item));
+        setAdditionalMaterials(prev => prev.map(item => {
+            if (item.id === id) {
+                const updatedItem = { ...item, [field]: value };
+                if (field === 'modelKey') {
+                     // Auto-detect unit based on selected model
+                    const model = materialOptions.find(opt => opt.value === value);
+                    updatedItem.unit = model?.unit || 'Pcs';
+                    updatedItem.materialAssetId = undefined; // Reset source on model change
+                }
+                return updatedItem;
+            }
+            return item;
+        }));
     };
     
-    const handleMaterialSelection = (materialKey: string) => {
-        const isCurrentlySelected = selectedMaterialKeys.includes(materialKey);
-        const newSelectedKeys = isCurrentlySelected
-            ? selectedMaterialKeys.filter(key => key !== materialKey)
-            : [...selectedMaterialKeys, materialKey];
-        
-        setSelectedMaterialKeys(newSelectedKeys);
-
-        if (newSelectedKeys.length === 0) {
-            setShowNewMaterialSection(false);
-        }
+    // --- Allocation Logic ---
+    const handleOpenAllocationModal = (index: number, modelKey: string) => {
+        if (!modelKey) return;
+        const [name, brand] = modelKey.split('|');
+        setAllocationModal({
+            isOpen: true,
+            itemIndex: index,
+            itemName: name,
+            brand: brand
+        });
     };
 
+    const handleAllocationSelect = (assetId: string) => {
+        if (allocationModal.itemIndex !== null) {
+            setAdditionalMaterials(prev => prev.map((item, idx) => {
+                if (idx === allocationModal.itemIndex) {
+                    return { ...item, materialAssetId: assetId };
+                }
+                return item;
+            }));
+        }
+    };
+    
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         const customer = customers.find(c => c.id === selectedCustomerId);
@@ -243,35 +279,17 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
             type: file.type.startsWith('image/') ? 'image' : (file.type === 'application/pdf' ? 'pdf' : 'other'),
         }));
         
-        const materialsMap = new Map<string, MaintenanceMaterial>();
-        const processMaterial = (material: MaintenanceMaterial) => {
-            const key = `${material.itemName}|${material.brand}`;
-            if (materialsMap.has(key)) {
-                const existing = materialsMap.get(key)!;
-                existing.quantity += material.quantity;
-            } else {
-                materialsMap.set(key, { ...material });
-            }
-        };
-
-        const newMaterials = additionalMaterials
-            .filter(m => m.modelKey && m.quantity)
-            .map(m => {
-                const [name, brand] = m.modelKey.split('|');
-                const selectedOption = materialOptions.find(opt => opt.value === m.modelKey);
-                const unit = selectedOption?.unit || 'pcs';
-
-                return {
-                    materialAssetId: undefined, // Backend logic
-                    itemName: name,
-                    brand,
-                    quantity: Number(m.quantity),
-                    unit,
-                };
-            });
-            
-        newMaterials.forEach(processMaterial);
-        const finalMaterialsUsed = Array.from(materialsMap.values());
+        const finalMaterialsUsed: MaintenanceMaterial[] = [];
+        additionalMaterials.filter(m => m.modelKey && m.quantity).forEach(m => {
+             const [name, brand] = m.modelKey.split('|');
+             finalMaterialsUsed.push({
+                 materialAssetId: m.materialAssetId,
+                 itemName: name,
+                 brand: brand,
+                 quantity: Number(m.quantity),
+                 unit: m.unit
+             });
+        });
 
         onSave({
             maintenanceDate: maintenanceDate!.toISOString(),
@@ -333,7 +351,6 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                                 onChange={(val) => {
                                     setSelectedCustomerId(val);
                                     setSelectedAssetIds([]);
-                                    setSelectedMaterialKeys([]);
                                 }} 
                                 isSearchable 
                                 placeholder="Cari pelanggan..." 
@@ -349,30 +366,25 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
 
                 {/* Asset Details Section */}
                  <section>
-                    <h4 className="font-semibold text-gray-800 border-b pb-1 mb-4">Detail Aset & Material yang Diperiksa</h4>
-                    <p className="text-sm text-gray-500 mb-4 -mt-2">Pilih item yang relevan dengan pekerjaan maintenance. Langkah ini opsional jika hanya ada penambahan material baru.</p>
-                    
-                    <div className="overflow-x-auto border border-gray-200 rounded-xl shadow-sm">
+                    <h4 className="font-semibold text-gray-800 border-b pb-1 mb-4 flex items-center gap-2">
+                         <BsBoxSeam className="text-tm-primary"/> Perangkat Terpasang (Pengecekan)
+                    </h4>
+                    <div className="overflow-x-auto border border-gray-200 rounded-xl shadow-sm bg-white">
                         <table className="min-w-full text-sm divide-y divide-gray-200">
                             <thead className="bg-gray-100">
                                 <tr>
-                                    <th className="w-12 px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Pilih</th>
+                                    <th className="w-12 px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Cek</th>
                                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Item</th>
-                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Tipe</th>
                                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Detail</th>
                                     <th className="w-40 px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Aksi</th>
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
-                                <tr className="bg-gray-50/80">
-                                    <th colSpan={5} className="px-4 py-2 text-left text-sm font-semibold text-gray-800">Perangkat Terpasang</th>
-                                </tr>
                                 {assetsForCustomer.length > 0 ? (
                                     assetsForCustomer.map(asset => {
                                         const isSelected = selectedAssetIds.includes(asset.id);
                                         const isReplacingThis = !!replacements[asset.id];
                                         
-                                        // Calculate existing selected replacements to exclude them from options
                                         const otherSelected = (Object.values(replacements) as Partial<MaintenanceReplacement>[])
                                             .filter(r => r.oldAssetId !== asset.id)
                                             .map(r => r.newAssetId)
@@ -383,26 +395,25 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                                                 <tr className={`${isSelected ? 'bg-blue-50/70' : 'hover:bg-gray-50/70'} transition-colors`}>
                                                     <td className="px-4 py-3 text-center align-top"><Checkbox id={`asset-select-${asset.id}`} checked={isSelected} onChange={() => handleAssetSelection(asset.id)} /></td>
                                                     <td className="px-4 py-3 font-semibold text-gray-900 align-top">{asset.name}</td>
-                                                    <td className="px-4 py-3 text-gray-600 align-top">Perangkat</td>
                                                     <td className="px-4 py-3 font-mono text-xs text-gray-500 align-top">{asset.id} <br /> SN: {asset.serialNumber || '-'}</td>
                                                     <td className="px-4 py-3 text-center align-top">
                                                         <button type="button" onClick={() => toggleReplacement(asset.id)} disabled={!isSelected} className={`px-3 py-1.5 text-xs font-semibold text-white rounded-md shadow-sm transition-colors ${isReplacingThis ? 'bg-red-500 hover:bg-red-600' : 'bg-tm-accent hover:bg-tm-primary'} disabled:bg-gray-300 disabled:cursor-not-allowed`}>
-                                                            {isReplacingThis ? 'Batal Ganti' : 'Ganti Aset'}
+                                                            {isReplacingThis ? 'Batal Ganti' : 'Ganti Perangkat'}
                                                         </button>
                                                     </td>
                                                 </tr>
                                                 {isReplacingThis && (
                                                     <tr className="bg-blue-50/30">
-                                                        <td colSpan={5} className="p-4">
+                                                        <td colSpan={4} className="p-4">
                                                             <div className="p-4 bg-white border border-blue-200 rounded-lg shadow-inner space-y-4">
-                                                                <h5 className="text-sm font-bold text-tm-primary">Panel Penggantian Perangkat</h5>
+                                                                <h5 className="text-sm font-bold text-tm-primary flex items-center gap-2"><BsWrench/> Panel Penggantian Perangkat</h5>
                                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                                     <div>
                                                                         <label className="block text-xs font-medium text-gray-700 mb-1">Kondisi Aset Lama</label>
                                                                         <CustomSelect options={Object.values(AssetCondition).map(c => ({ value: c, label: c }))} value={replacements[asset.id]?.retrievedAssetCondition || ''} onChange={value => updateReplacementDetail(asset.id, 'retrievedAssetCondition', value)} />
                                                                     </div>
                                                                     <div>
-                                                                        <label className="block text-xs font-medium text-gray-700 mb-1">Aset Pengganti</label>
+                                                                        <label className="block text-xs font-medium text-gray-700 mb-1">Aset Pengganti (Dari Stok)</label>
                                                                         <CustomSelect 
                                                                             options={getReplacementOptions(asset.id, otherSelected)} 
                                                                             value={replacements[asset.id]?.newAssetId || ''} 
@@ -420,62 +431,86 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                                         );
                                     })
                                 ) : (
-                                    <tr><td colSpan={5} className="p-6 text-center text-gray-500">Tidak ada perangkat terpasang.</td></tr>
-                                )}
-                                
-                                <tr className="bg-gray-50/80">
-                                    <th colSpan={5} className="px-4 py-2 text-left text-sm font-semibold text-gray-800">Material Terpasang</th>
-                                </tr>
-                                {(selectedCustomer?.installedMaterials && selectedCustomer.installedMaterials.length > 0) ? (
-                                    selectedCustomer.installedMaterials.map(material => {
-                                        const materialKey = `${material.itemName}|${material.brand}`;
-                                        const isSelected = selectedMaterialKeys.includes(materialKey);
-                                        return (
-                                            <React.Fragment key={materialKey}>
-                                                <tr className={`${isSelected ? 'bg-blue-50/70' : 'hover:bg-gray-50/70'} transition-colors`}>
-                                                    <td className="px-4 py-3 text-center align-top"><Checkbox id={`material-select-${materialKey}`} checked={isSelected} onChange={() => handleMaterialSelection(materialKey)} /></td>
-                                                    <td className="px-4 py-3 font-semibold text-gray-900 align-top">{material.itemName}</td>
-                                                    <td className="px-4 py-3 text-gray-600 align-top">Material</td>
-                                                    <td className="px-4 py-3 text-gray-500 align-top">{material.quantity} {material.unit}</td>
-                                                    <td className="px-4 py-3 text-center align-top">
-                                                         <button type="button" onClick={() => setShowNewMaterialSection(prev => !prev)} disabled={!isSelected} className="px-3 py-1.5 text-xs font-semibold text-white rounded-md shadow-sm transition-colors bg-tm-accent hover:bg-tm-primary disabled:bg-gray-300 disabled:cursor-not-allowed">
-                                                            {showNewMaterialSection ? 'Tutup Form' : 'Ganti/Tambah'}
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            </React.Fragment>
-                                        );
-                                    })
-                                ) : (
-                                    <tr><td colSpan={5} className="p-6 text-center text-gray-500">Tidak ada material tercatat.</td></tr>
+                                    <tr><td colSpan={4} className="p-6 text-center text-gray-500">Tidak ada perangkat terpasang.</td></tr>
                                 )}
                             </tbody>
-                            {showNewMaterialSection && (
-                                <tfoot className="bg-gray-50 border-t-2 border-gray-300">
-                                    <tr>
-                                        <th colSpan={5} className="px-4 py-3 text-left text-sm font-semibold text-gray-800">Penggunaan Material Baru</th>
-                                    </tr>
-                                    {additionalMaterials.map((material) => (
-                                        <tr key={material.id} className="border-t">
-                                            <td colSpan={2} className="px-4 py-3">
-                                                <CustomSelect options={materialOptions} value={material.modelKey} onChange={val => handleMaterialChange(material.id, 'modelKey', val)} placeholder="Pilih material..." isSearchable/>
-                                            </td>
-                                            <td className="px-4 py-3"><input type="number" value={material.quantity} onChange={e => handleMaterialChange(material.id, 'quantity', e.target.value)} min="1" className="block w-24 px-3 py-2 text-sm text-gray-900 bg-white border border-gray-300 rounded-lg shadow-sm"/></td>
-                                            <td colSpan={2} className="px-4 py-3 text-right">
-                                                <button type="button" onClick={() => removeAdditionalMaterial(material.id)} className="p-2 text-red-500 rounded-full hover:bg-red-100"><TrashIcon className="w-4 h-4" /></button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    <tr>
-                                        <td colSpan={5} className="px-4 py-3 text-center">
-                                            <button type="button" onClick={() => addAdditionalMaterial()} className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-tm-primary bg-blue-100 rounded-md hover:bg-blue-200 shadow-sm">
-                                                <PlusIcon className="w-4 h-4"/>Tambah Material Baru
+                        </table>
+                    </div>
+                </section>
+                
+                {/* NEW Material Section */}
+                <section>
+                    <h4 className="font-semibold text-gray-800 border-b pb-1 mb-4 flex items-center gap-2">
+                        <BsLightningFill className="text-orange-500"/> Material Tambahan / Sparepart
+                    </h4>
+                    <div className="border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+                        <table className="min-w-full text-sm divide-y divide-gray-200">
+                             <thead className="bg-gray-100">
+                                <tr>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase w-5/12">Material Name</th>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase w-2/12">Qty</th>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase w-4/12">Sumber Stok</th>
+                                    <th className="w-10"></th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {additionalMaterials.map((material, index) => (
+                                    <tr key={material.id} className="bg-white">
+                                        <td className="px-4 py-3 align-top">
+                                            <div className="flex flex-col gap-1">
+                                                <CustomSelect 
+                                                    options={materialOptions} 
+                                                    value={material.modelKey} 
+                                                    onChange={val => handleMaterialChange(material.id, 'modelKey', val)} 
+                                                    placeholder="Pilih material..." 
+                                                    isSearchable
+                                                />
+                                                {material.materialAssetId && (
+                                                    <span className="text-[10px] text-blue-600 font-mono bg-blue-50 px-1 rounded w-fit">Sumber: {material.materialAssetId}</span>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3 align-top">
+                                             <div className="relative">
+                                                <input 
+                                                    type="number" 
+                                                    value={material.quantity} 
+                                                    onChange={e => handleMaterialChange(material.id, 'quantity', e.target.value)} 
+                                                    min="1" 
+                                                    className="block w-full px-3 py-2 text-sm text-gray-900 bg-white border border-gray-300 rounded-lg shadow-sm pr-10"
+                                                    placeholder="0"
+                                                />
+                                                <span className="absolute right-3 top-2 text-xs text-gray-500">{material.unit}</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-4 py-3 align-top">
+                                            <button 
+                                                type="button" 
+                                                onClick={() => handleOpenAllocationModal(index, material.modelKey)}
+                                                disabled={!material.modelKey}
+                                                className={`w-full h-[38px] px-2 text-xs font-semibold rounded-lg border flex items-center justify-center gap-1 transition-colors
+                                                    ${material.materialAssetId 
+                                                        ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' 
+                                                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                                                    } ${!material.modelKey ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                                title="Pilih sumber stok spesifik (Drum/Box)"
+                                            >
+                                                <ArchiveBoxIcon className="w-3.5 h-3.5" />
+                                                {material.materialAssetId ? 'Ubah Sumber' : 'Otomatis (FIFO)'}
                                             </button>
                                         </td>
+                                        <td className="px-4 py-3 text-center align-top">
+                                            <button type="button" onClick={() => removeAdditionalMaterial(material.id)} className="p-2 text-red-500 rounded-full hover:bg-red-100 bg-white border border-gray-200"><TrashIcon className="w-4 h-4" /></button>
+                                        </td>
                                     </tr>
-                                </tfoot>
-                            )}
+                                ))}
+                            </tbody>
                         </table>
+                        <div className="bg-gray-50 p-2 border-t text-center">
+                            <button type="button" onClick={() => addAdditionalMaterial()} className="inline-flex items-center gap-1 text-xs font-semibold text-tm-primary hover:underline">
+                                <PlusIcon className="w-3 h-3"/> Tambah Material
+                            </button>
+                        </div>
                     </div>
                 </section>
                 
@@ -577,6 +612,23 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                     </button>
                 </div>
             </FloatingActionBar>
+            
+            {/* Allocation Modal */}
+            {allocationModal.isOpen && (
+                <MaterialAllocationModal 
+                    isOpen={allocationModal.isOpen}
+                    onClose={() => setAllocationModal(prev => ({ ...prev, isOpen: false }))}
+                    itemName={allocationModal.itemName}
+                    brand={allocationModal.brand}
+                    assets={assets} // Pass all assets to let modal filter
+                    onSelect={handleAllocationSelect}
+                    currentSelectedId={
+                        allocationModal.itemIndex !== null 
+                        ? additionalMaterials[allocationModal.itemIndex]?.materialAssetId 
+                        : undefined
+                    }
+                />
+            )}
         </>
     );
 };

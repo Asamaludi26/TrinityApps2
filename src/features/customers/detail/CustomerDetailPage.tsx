@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { Customer, Asset, Page, PreviewData, AssetCategory, Maintenance, Dismantle, Installation } from '../../../types';
+import { Customer, Asset, Page, PreviewData, AssetCategory, Maintenance, Dismantle, Installation, CustomerStatus } from '../../../types';
 import { DetailPageLayout } from '../../../components/layout/DetailPageLayout';
 import { getStatusClass } from '../list/CustomerListPage';
 import { PencilIcon } from '../../../components/icons/PencilIcon';
@@ -163,6 +163,24 @@ const CustomerDetailPage: React.FC<CustomerDetailPageProps> = ({ initialState, s
         setActivePage('customer-edit', { customerId: customer.id });
     };
 
+    // Logic Button State
+    const hasAssets = customerAssets.length > 0;
+    const isSuspended = customer.status === CustomerStatus.SUSPENDED;
+
+    // Maintenance Logic: Disabled if No Assets OR Suspended
+    const isMaintenanceDisabled = !hasAssets || isSuspended;
+    const maintenanceTooltip = !hasAssets 
+        ? "Pelanggan tidak memiliki aset untuk di-maintenance" 
+        : isSuspended 
+            ? "Tidak dapat melakukan maintenance pada pelanggan berstatus Suspend" 
+            : "Buat laporan maintenance untuk aset pelanggan";
+
+    // Dismantle Logic: Disabled ONLY if No Assets (Can dismantle suspended users)
+    const isDismantleDisabled = !hasAssets;
+    const dismantleTooltip = !hasAssets 
+        ? "Pelanggan tidak memiliki aset untuk ditarik" 
+        : "Mulai proses penarikan aset dari pelanggan";
+
     const DetailTabContent = (
         <div className="space-y-8">
             {/* Contact Info */}
@@ -233,21 +251,35 @@ const CustomerDetailPage: React.FC<CustomerDetailPageProps> = ({ initialState, s
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
                             {customer.installedMaterials && customer.installedMaterials.length > 0 ? customer.installedMaterials.map((material, index) => {
-                                const materialType = assetCategories
-                                    .flatMap(cat => cat.types)
-                                    .find(type => type.standardItems?.some(item => item.name === material.itemName && item.brand === material.brand));
+                                // FIXED: Lookup logic to properly find StandardItem for quantity conversion
+                                let materialItem: any = null;
+                                let materialType: any = null;
+                                
+                                for (const cat of assetCategories) {
+                                    for (const type of cat.types) {
+                                        const found = type.standardItems?.find(i => i.name === material.itemName && i.brand === material.brand);
+                                        if (found) {
+                                            materialItem = found;
+                                            materialType = type;
+                                            break;
+                                        }
+                                    }
+                                    if (materialItem) break;
+                                }
 
                                 let quantityDisplay = `${material.quantity} ${material.unit}`;
 
-                                if (materialType?.trackingMethod === 'bulk' && materialType.quantityPerUnit && materialType.quantityPerUnit > 0) {
-                                    const quantityPerUnit = materialType.quantityPerUnit;
-                                    const totalBaseQuantity = material.quantity;
+                                // Use quantityPerUnit from the StandardItem (Model), not Type
+                                if (materialType?.trackingMethod === 'bulk' && materialItem?.quantityPerUnit && materialItem.quantityPerUnit > 0) {
+                                    const quantityPerUnit = materialItem.quantityPerUnit;
+                                    const totalBaseQuantity = material.quantity; // e.g., 1200 Meter
 
+                                    // Example: 1200 / 1000 = 1 Drum + 200 Meter
                                     const fullUnits = Math.floor(totalBaseQuantity / quantityPerUnit);
                                     const remainingBaseUnits = totalBaseQuantity % quantityPerUnit;
 
-                                    const unitOfMeasure = materialType.unitOfMeasure || 'unit';
-                                    const baseUnitOfMeasure = materialType.baseUnitOfMeasure || material.unit;
+                                    const unitOfMeasure = materialItem.unitOfMeasure || materialType.unitOfMeasure || 'unit'; // e.g. Hasbal
+                                    const baseUnitOfMeasure = materialItem.baseUnitOfMeasure || material.unit; // e.g. Meter
 
                                     const parts = [];
                                     if (fullUnits > 0) {
@@ -287,6 +319,11 @@ const CustomerDetailPage: React.FC<CustomerDetailPageProps> = ({ initialState, s
                 <span className={`px-2.5 py-1 text-sm font-bold rounded-full ${getStatusClass(customer.status)}`}>
                     {customer.status}
                 </span>
+                {isSuspended && (
+                    <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-800">
+                        <strong>Perhatian:</strong> Pelanggan ini sedang ditangguhkan. Layanan maintenance dinonaktifkan sementara.
+                    </div>
+                )}
             </div>
             <div className="p-5 bg-white border border-gray-200/80 rounded-xl shadow-sm">
                 <h3 className="text-base font-semibold text-gray-800 mb-4">Aksi Cepat</h3>
@@ -298,12 +335,12 @@ const CustomerDetailPage: React.FC<CustomerDetailPageProps> = ({ initialState, s
                         <CustomerIcon className="w-4 h-4"/>
                         Instalasi
                     </button>
-                    <Tooltip text={customerAssets.length === 0 ? "Pelanggan tidak memiliki aset untuk di-maintenance" : "Buat laporan maintenance untuk aset pelanggan"}>
+                    <Tooltip text={maintenanceTooltip}>
                         <div className="w-full">
                             <button
                                 onClick={() => setActivePage('customer-maintenance-form', { prefillCustomer: customer.id })}
-                                disabled={customerAssets.length === 0}
-                                className="w-full justify-center inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-warning-text bg-warning/20 rounded-lg shadow-sm hover:bg-warning/30 disabled:bg-gray-300 disabled:text-gray-500 disabled:cursor-not-allowed"
+                                disabled={isMaintenanceDisabled}
+                                className="w-full justify-center inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-warning-text bg-warning/20 rounded-lg shadow-sm hover:bg-warning/30 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed"
                             >
                                 <WrenchIcon className="w-4 h-4"/>
                                 Maintenance
@@ -311,12 +348,12 @@ const CustomerDetailPage: React.FC<CustomerDetailPageProps> = ({ initialState, s
                         </div>
                     </Tooltip>
 
-                    <Tooltip text={customerAssets.length === 0 ? "Pelanggan tidak memiliki aset untuk ditarik" : "Mulai proses penarikan aset dari pelanggan"}>
+                    <Tooltip text={dismantleTooltip}>
                         <div className="w-full">
                             <button
                                 onClick={() => setActivePage('customer-dismantle', { prefillCustomerId: customer.id })}
-                                disabled={customerAssets.length === 0}
-                                className="w-full justify-center inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-danger rounded-lg shadow-sm hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                disabled={isDismantleDisabled}
+                                className="w-full justify-center inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-danger rounded-lg shadow-sm hover:bg-red-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed"
                             >
                                 <DismantleIcon className="w-4 h-4"/>
                                 Dismantle

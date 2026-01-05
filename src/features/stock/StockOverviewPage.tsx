@@ -258,7 +258,7 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
                     
                     isMeasurement,
                     // UPDATED LOGIC: Prioritize Model > Type > Default
-                    baseUnit: isMeasurement ? (model?.baseUnitOfMeasure || type?.baseUnitOfMeasure || 'Meter') : undefined,
+                    baseUnit: isMeasurement ? (model?.baseUnitOfMeasure || type?.unitOfMeasure || 'Meter') : undefined,
                     storageBalance: 0,
                     inUseBalance: 0,
                     damagedBalance: 0,

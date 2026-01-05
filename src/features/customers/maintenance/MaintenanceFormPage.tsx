@@ -171,10 +171,12 @@ const MaintenanceFormPage: React.FC<MaintenanceManagementPageProps> = (props) =>
                 for (const cat of assetCategories) {
                     if (materialFound) break;
                     for (const type of cat.types) {
-                        if (type.trackingMethod === "bulk" && type.standardItems?.some((item) => item.name === material.itemName && item.brand === material.brand)) {
-                            unit = type.baseUnitOfMeasure || "pcs";
-                            if (type.quantityPerUnit) {
-                                convertedQuantity = material.quantity * type.quantityPerUnit;
+                        const matchedItem = type.standardItems?.find((item) => item.name === material.itemName && item.brand === material.brand);
+
+                        if (type.trackingMethod === "bulk" && matchedItem) {
+                            unit = matchedItem.baseUnitOfMeasure || type.unitOfMeasure || "pcs";
+                            if (matchedItem.quantityPerUnit) {
+                                convertedQuantity = material.quantity * matchedItem.quantityPerUnit;
                             }
                             materialFound = true;
                             break;
@@ -187,6 +189,8 @@ const MaintenanceFormPage: React.FC<MaintenanceManagementPageProps> = (props) =>
                     quantity: convertedQuantity,
                     unit: unit,
                     installationDate: newMaintenance.maintenanceDate,
+                    // IMPORTANT: Pass the specific source ID if selected
+                    materialAssetId: material.materialAssetId 
                 };
             });
 

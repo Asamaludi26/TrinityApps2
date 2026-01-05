@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Page, User, Installation, PreviewData, ItemStatus, AssetStatus, InstalledMaterial } from '../../../types';
+import { Page, User, Installation, PreviewData, ItemStatus, AssetStatus, InstalledMaterial, CustomerStatus } from '../../../types';
 import { useSortableData } from '../../../hooks/useSortableData';
 import { useGenericFilter } from '../../../hooks/useGenericFilter';
 import { useNotification } from '../../../providers/NotificationProvider';
@@ -152,10 +152,10 @@ const InstallationFormPage: React.FC<InstallationFormPageProps> = (props) => {
             }
         }
 
-        // 2. Update Stock for Materials (Bulk Tracking - Centralized)
+        // 2. Update Stock for Materials & Customer Status Logic
+        const customer = customers.find(c => c.id === installationData.customerId);
+        
         if (installationData.materialsUsed && installationData.materialsUsed.length > 0) {
-             const customer = customers.find(c => c.id === installationData.customerId);
-             
              // A. Consume Stock via Store Action
              const result = await consumeMaterials(
                  installationData.materialsUsed,
@@ -192,7 +192,18 @@ const InstallationFormPage: React.FC<InstallationFormPageProps> = (props) => {
                     }
                  });
                  
-                 await updateCustomer(customer.id, { installedMaterials: updatedMaterials });
+                 // SMART LOGIC: Update customer status to ACTIVE if assets installed
+                 const shouldActivate = customer.status !== CustomerStatus.ACTIVE;
+                 
+                 await updateCustomer(customer.id, { 
+                     installedMaterials: updatedMaterials,
+                     status: shouldActivate ? CustomerStatus.ACTIVE : customer.status
+                 });
+             }
+        } else if (customer && installationData.assetsInstalled.length > 0) {
+             // If only devices installed (no materials), still check for activation
+             if (customer.status !== CustomerStatus.ACTIVE) {
+                 await updateCustomer(customer.id, { status: CustomerStatus.ACTIVE });
              }
         }
 
