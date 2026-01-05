@@ -571,7 +571,7 @@ export interface ParsedScanResult {
 }
 
 export type PreviewData = {
-    type: 'asset' | 'customer' | 'user' | 'request' | 'handover' | 'dismantle' | 'customerAssets' | 'stockItemAssets' | 'stockHistory';
+    type: 'asset' | 'customer' | 'user' | 'request' | 'handover' | 'dismantle' | 'customerAssets' | 'stockItemAssets' | 'stockHistory' | 'installation' | 'maintenance';
     id: string | number;
     data?: any;
 };

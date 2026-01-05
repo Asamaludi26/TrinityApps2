@@ -1,5 +1,5 @@
 
-import { useMemo } from 'react';
+import { useMemo, useCallback } from 'react';
 import { useAssetStore } from '../../../stores/useAssetStore';
 import { AssetStatus, Asset } from '../../../types';
 
@@ -68,13 +68,14 @@ export const useCustomerAssetLogic = () => {
     }, [categories]);
 
     // 3. Get Assets Owned by Specific Customer
-    const getCustomerAssets = (customerId: string) => {
+    // Wrapped in useCallback to prevent infinite useEffect loops in consumers
+    const getCustomerAssets = useCallback((customerId: string) => {
         return assets.filter(a => a.currentUser === customerId && a.status === AssetStatus.IN_USE);
-    };
+    }, [assets]);
 
     // 4. Get Replacement Candidates (Smart Logic)
     // Mencari aset di gudang yang Tipe & Brand-nya SAMA dengan aset yang rusak/diganti
-    const getReplacementOptions = (assetToReplaceId: string, currentSelections: string[] = []) => {
+    const getReplacementOptions = useCallback((assetToReplaceId: string, currentSelections: string[] = []) => {
         const oldAsset = assets.find(a => a.id === assetToReplaceId);
         if (!oldAsset) return [];
 
@@ -88,7 +89,7 @@ export const useCustomerAssetLogic = () => {
             value: a.id,
             label: `${a.id} (SN: ${a.serialNumber || 'N/A'})`
         }));
-    };
+    }, [assets]);
 
     return {
         assets, // Raw assets if needed

@@ -198,7 +198,7 @@ export const useDashboardData = (currentUserRole: string, currentUserName: strin
                 date: new Date(mnt.maintenanceDate),
                 timestamp: mnt.maintenanceDate,
                 type: 'maintenance',
-                previewData: { type: 'customer-maintenance-form', id: mnt.id } // Special handling needed in preview
+                previewData: { type: 'maintenance', id: mnt.id } // Special handling needed in preview
             });
         });
 

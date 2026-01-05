@@ -1,6 +1,6 @@
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Asset, AssetStatus, PreviewData } from '../../../types';
+import React, { useState, useMemo, useRef } from 'react';
+import { Asset, AssetStatus, PreviewData, AssetCondition, ActivityLogEntry } from '../../../types';
 import { ClickableLink } from '../../../components/ui/ClickableLink';
 import { RegisterIcon } from '../../../components/icons/RegisterIcon';
 import { HandoverIcon } from '../../../components/icons/HandoverIcon';
@@ -16,59 +16,159 @@ import { CopyIcon } from '../../../components/icons/CopyIcon';
 import { EyeIcon } from '../../../components/icons/EyeIcon';
 import { DownloadIcon } from '../../../components/icons/DownloadIcon';
 import { DollarIcon } from '../../../components/icons/DollarIcon';
-import { PrintIcon } from '../../../components/icons/PrintIcon'; 
+import { ArchiveBoxIcon } from '../../../components/icons/ArchiveBoxIcon';
 import { getAssetStatusClass } from '../../../utils/statusUtils';
 import { calculateAssetDepreciation } from '../../../utils/depreciation';
 import { PreviewRow } from './PreviewRow';
 import { useNotification } from '../../../providers/NotificationProvider'; 
-import { AssetLabel } from '../../../components/ui/AssetLabel'; // Imported reusable component
+import { AssetLabel } from '../../../components/ui/AssetLabel'; 
+import { BsRulers, BsClockHistory, BsFileEarmarkText, BsPersonBadge, BsFilePdf, BsImage, BsFileEarmark } from 'react-icons/bs';
+
+// Stores Integration
+import { useAssetStore } from '../../../stores/useAssetStore';
+import { useMasterDataStore } from '../../../stores/useMasterDataStore';
+import { useTransactionStore } from '../../../stores/useTransactionStore';
 
 declare var html2canvas: any;
 
 // --- Sub-Components ---
 
-const RepairStatusCard: React.FC<{ asset: Asset }> = ({ asset }) => {
-    const repairInfo = useMemo(() => {
-        const reportLog = [...(asset.activityLog || [])].reverse().find(log => log.action === 'Kerusakan Dilaporkan');
-        const startLog = [...(asset.activityLog || [])].reverse().find(log => log.action === 'Proses Perbaikan Dimulai');
+const SmartContextCard: React.FC<{ 
+    asset: Asset, 
+    onShowPreview: (data: PreviewData) => void 
+}> = ({ asset, onShowPreview }) => {
+    // Access Stores for Context Lookup
+    const customers = useMasterDataStore(s => s.customers);
+    const users = useMasterDataStore(s => s.users);
+    const maintenances = useTransactionStore(s => s.maintenances);
+    const installations = useTransactionStore(s => s.installations);
 
-        const originalReport = reportLog?.details.match(/deskripsi: "(.*?)"/)?.[1] || 'Tidak ada deskripsi.';
-        const reporter = reportLog?.user || 'N/A';
-        const reportDate = reportLog ? new Date(reportLog.timestamp).toLocaleString('id-ID') : 'N/A';
-        
-        const technician = startLog?.details.match(/oleh (.*?)\./)?.[1] || null;
-        const estimatedDate = startLog?.details.match(/selesai: (.*?)\./)?.[1] || null;
+    // 1. Context: Customer Installation
+    if (asset.status === AssetStatus.IN_USE && asset.currentUser?.startsWith('CUST-')) {
+        const customer = customers.find(c => c.id === asset.currentUser);
+        // Find latest installation doc for this customer that includes this asset
+        const installationDoc = installations.find(i => 
+            i.customerId === asset.currentUser && 
+            (i.assetsInstalled.some(ai => ai.assetId === asset.id) || i.materialsUsed?.some(mi => mi.materialAssetId === asset.id))
+        );
 
-        return { originalReport, reporter, reportDate, technician, estimatedDate };
-    }, [asset.activityLog]);
-
-    const isUnderRepair = asset.status === AssetStatus.UNDER_REPAIR;
-
-    return (
-        <div className={`p-4 rounded-lg border-l-4 ${isUnderRepair ? 'bg-blue-50 border-blue-500' : 'bg-amber-50 border-amber-500'}`}>
-            <div className="flex items-center gap-3 mb-3">
-                <div className={`flex items-center justify-center w-8 h-8 rounded-full ${isUnderRepair ? 'bg-blue-100 text-blue-600' : 'bg-amber-100 text-amber-600'}`}>
-                    {isUnderRepair ? <SpinnerIcon className="animate-spin" /> : <WrenchIcon />}
+        return (
+            <div className="p-4 rounded-xl bg-blue-50 border border-blue-200 shadow-sm animate-fade-in-up">
+                <div className="flex items-start gap-3">
+                    <div className="p-2 bg-blue-100 text-blue-600 rounded-lg"><CustomerIcon className="w-5 h-5"/></div>
+                    <div className="flex-1">
+                        <h4 className="text-sm font-bold text-blue-900">Terpasang di Pelanggan</h4>
+                        {customer ? (
+                            <div className="mt-1 text-sm text-blue-800">
+                                <p className="font-semibold">{customer.name}</p>
+                                <p className="text-xs opacity-80">{customer.address}</p>
+                                <div className="mt-2 flex gap-2">
+                                    <button onClick={() => onShowPreview({ type: 'customer', id: customer.id })} className="text-xs bg-white px-2 py-1 rounded border border-blue-200 hover:bg-blue-100 font-medium transition-colors">
+                                        Lihat Profil Pelanggan
+                                    </button>
+                                    {installationDoc && (
+                                        <button onClick={() => onShowPreview({ type: 'installation', id: installationDoc.id })} className="text-xs bg-white px-2 py-1 rounded border border-blue-200 hover:bg-blue-100 font-medium transition-colors flex items-center gap-1">
+                                            <BsFileEarmarkText/> Lihat Dokumen Instalasi
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        ) : (
+                            <p className="text-xs text-red-500 mt-1">Data pelanggan ({asset.currentUser}) tidak ditemukan.</p>
+                        )}
+                    </div>
                 </div>
-                <h3 className="text-lg font-bold text-gray-800">
-                    Status Perbaikan: <span className={isUnderRepair ? 'text-blue-700' : 'text-amber-700'}>{isUnderRepair ? 'Dalam Perbaikan' : 'Menunggu Aksi Admin'}</span>
-                </h3>
             </div>
-            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-6 text-sm">
-                <PreviewRow label="Dilaporkan oleh" value={repairInfo.reporter} />
-                <PreviewRow label="Tanggal Laporan" value={repairInfo.reportDate} />
-                <PreviewRow label="Deskripsi Laporan" fullWidth>
-                    <p className="italic text-gray-600">"{repairInfo.originalReport}"</p>
-                </PreviewRow>
-                {isUnderRepair && (
-                    <>
-                        <PreviewRow label="Ditangani oleh" value={repairInfo.technician || 'N/A'} />
-                        <PreviewRow label="Estimasi Selesai" value={repairInfo.estimatedDate || 'N/A'} />
-                    </>
-                )}
-            </dl>
-        </div>
-    );
+        );
+    }
+
+    // 2. Context: Internal User (Staff)
+    if (asset.status === AssetStatus.IN_USE) {
+        const user = users.find(u => u.name === asset.currentUser);
+        return (
+            <div className="p-4 rounded-xl bg-indigo-50 border border-indigo-200 shadow-sm animate-fade-in-up">
+                <div className="flex items-start gap-3">
+                    <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg"><BsPersonBadge className="w-5 h-5"/></div>
+                    <div className="flex-1">
+                        <h4 className="text-sm font-bold text-indigo-900">Digunakan Oleh Staff</h4>
+                        <div className="mt-1 text-sm text-indigo-800">
+                            <p className="font-semibold">{asset.currentUser}</p>
+                            {user && <p className="text-xs opacity-80">{user.role} - {user.email}</p>}
+                            <p className="text-xs mt-1 text-indigo-600 italic">Lokasi: {asset.location || 'Tidak spesifik'}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // 3. Context: Maintenance / Repair
+    if (asset.status === AssetStatus.UNDER_REPAIR || asset.status === AssetStatus.OUT_FOR_REPAIR || asset.status === AssetStatus.DAMAGED) {
+        // Find active maintenance ticket
+        const activeMnt = maintenances.find(m => 
+            m.status !== 'Selesai' && 
+            (m.assets?.some(a => a.assetId === asset.id) || m.problemDescription.includes(asset.name))
+        );
+
+        const isExternal = asset.status === AssetStatus.OUT_FOR_REPAIR;
+        const colorClass = isExternal ? 'purple' : (asset.status === AssetStatus.DAMAGED ? 'red' : 'amber');
+        
+        return (
+            <div className={`p-4 rounded-xl bg-${colorClass}-50 border border-${colorClass}-200 shadow-sm animate-fade-in-up`}>
+                <div className="flex items-start gap-3">
+                    <div className={`p-2 bg-${colorClass}-100 text-${colorClass}-600 rounded-lg`}>
+                        <WrenchIcon className="w-5 h-5"/>
+                    </div>
+                    <div className="flex-1">
+                        <h4 className={`text-sm font-bold text-${colorClass}-900`}>
+                            {asset.status === AssetStatus.DAMAGED ? 'Rusak / Menunggu Perbaikan' : 
+                             isExternal ? 'Sedang di Vendor (Eksternal)' : 'Dalam Perbaikan (Internal)'}
+                        </h4>
+                        
+                        {activeMnt ? (
+                             <div className={`mt-2 text-xs text-${colorClass}-800`}>
+                                <p><strong>Tiket:</strong> {activeMnt.docNumber}</p>
+                                <p><strong>Teknisi:</strong> {activeMnt.technician}</p>
+                                <p className="mt-1 italic line-clamp-1">"{activeMnt.problemDescription}"</p>
+                                <button onClick={() => onShowPreview({ type: 'maintenance', id: activeMnt.id })} className="mt-2 text-xs bg-white px-2 py-1 rounded border hover:opacity-80 font-medium transition-colors flex items-center gap-1">
+                                    <BsFileEarmarkText/> Lihat Laporan
+                                </button>
+                            </div>
+                        ) : (
+                            <p className={`text-xs mt-1 text-${colorClass}-700 italic`}>Belum ada tiket maintenance aktif.</p>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    }
+    
+    // 4. Context: In Storage (Aging info)
+    if (asset.status === AssetStatus.IN_STORAGE) {
+        // Calculate days in storage since last status change
+        const lastActivity = [...asset.activityLog].reverse().find(a => a.action.includes('Status') || a.action.includes('Dicatat'));
+        const lastDate = lastActivity ? new Date(lastActivity.timestamp) : new Date(asset.registrationDate);
+        const daysInStorage = Math.floor((new Date().getTime() - lastDate.getTime()) / (1000 * 3600 * 24));
+        
+        return (
+            <div className="p-4 rounded-xl bg-gray-50 border border-gray-200 shadow-sm animate-fade-in-up">
+                 <div className="flex items-start gap-3">
+                    <div className="p-2 bg-gray-200 text-gray-600 rounded-lg"><BsClockHistory className="w-5 h-5"/></div>
+                    <div>
+                         <h4 className="text-sm font-bold text-gray-800">Tersedia di Gudang</h4>
+                         <p className="text-xs text-gray-600 mt-1">
+                             Lokasi: <span className="font-semibold">{asset.location}</span> {asset.locationDetail && `(${asset.locationDetail})`}
+                         </p>
+                         <p className="text-xs text-gray-500 mt-1">
+                             Aging: <strong>{daysInStorage} hari</strong> sejak aktivitas terakhir.
+                         </p>
+                    </div>
+                 </div>
+            </div>
+        )
+    }
+
+    return null;
 };
 
 const DepreciationCard: React.FC<{ asset: Asset }> = ({ asset }) => {
@@ -175,6 +275,18 @@ const AssetLabelCard: React.FC<{ asset: Asset }> = ({ asset }) => {
     );
 };
 
+// --- Timeline Item Helper ---
+const getLogStyle = (action: string) => {
+    if (action.includes('Dicatat') || action.includes('Baru')) return { icon: RegisterIcon, bg: 'bg-green-100', text: 'text-green-600', border: 'border-green-200' };
+    if (action.includes('Serah Terima') || action.includes('Handover')) return { icon: HandoverIcon, bg: 'bg-blue-100', text: 'text-blue-600', border: 'border-blue-200' };
+    if (action.includes('Instalasi')) return { icon: CustomerIcon, bg: 'bg-indigo-100', text: 'text-indigo-600', border: 'border-indigo-200' };
+    if (action.includes('Dismantle')) return { icon: DismantleIcon, bg: 'bg-orange-100', text: 'text-orange-600', border: 'border-orange-200' };
+    if (action.includes('Kerusakan')) return { icon: WrenchIcon, bg: 'bg-red-100', text: 'text-red-600', border: 'border-red-200' };
+    if (action.includes('Perbaikan')) return { icon: SpinnerIcon, bg: 'bg-amber-100', text: 'text-amber-600', border: 'border-amber-200' };
+    if (action.includes('Status')) return { icon: TagIcon, bg: 'bg-gray-100', text: 'text-gray-600', border: 'border-gray-200' };
+    return { icon: InfoIcon, bg: 'bg-gray-50', text: 'text-gray-500', border: 'border-gray-200' };
+};
+
 // --- Main Asset Preview Component ---
 
 interface AssetPreviewProps {
@@ -186,20 +298,23 @@ interface AssetPreviewProps {
 
 export const AssetPreview: React.FC<AssetPreviewProps> = ({ asset, canViewPrice, onShowPreview, getCustomerName }) => {
     const [activeTab, setActiveTab] = useState<'details' | 'history' | 'attachments'>('details');
+    const allAssets = useAssetStore((state) => state.assets); // Access store for calculation
 
-    const getLogIcon = (action: string) => {
-        const iconClass = "w-4 h-4 text-blue-800";
-        if (action.includes('Dicatat')) return <RegisterIcon className={iconClass} />;
-        if (action.includes('Serah Terima')) return <HandoverIcon className={iconClass} />;
-        if (action.includes('Instalasi')) return <CustomerIcon className={iconClass} />;
-        if (action.includes('Dismantle')) return <DismantleIcon className={iconClass} />;
-        if (action.includes('Diperbarui')) return <PencilIcon className={iconClass} />;
-        if (action.includes('Status')) return <TagIcon className={iconClass} />;
-        if (action.includes('Kerusakan Dilaporkan')) return <WrenchIcon className={iconClass} />;
-        if (action.includes('Perbaikan Dimulai')) return <SpinnerIcon className={`${iconClass} animate-spin`} />;
-        if (action.includes('Perbaikan Selesai')) return <CheckIcon className={iconClass} />;
-        return <InfoIcon className={iconClass} />;
-    };
+    // Kalkulasi Stok Model yang Sama
+    const stockStats = useMemo(() => {
+        const sameModelAssets = allAssets.filter(a => a.name === asset.name && a.brand === asset.brand);
+        const inStorageCount = sameModelAssets.filter(a => a.status === AssetStatus.IN_STORAGE).length;
+        const totalCount = sameModelAssets.length;
+        
+        // Cek apakah item ini terukur (Measurement)
+        const isMeasurement = asset.initialBalance !== undefined && asset.currentBalance !== undefined;
+        
+        return {
+            inStorage: inStorageCount,
+            total: totalCount,
+            isMeasurement
+        };
+    }, [allAssets, asset]);
 
     return (
         <div>
@@ -211,11 +326,35 @@ export const AssetPreview: React.FC<AssetPreviewProps> = ({ asset, canViewPrice,
                 </nav>
             </div>
             <div className="py-6 max-h-[60vh] overflow-y-auto custom-scrollbar">
-                {[AssetStatus.DAMAGED, AssetStatus.UNDER_REPAIR, AssetStatus.OUT_FOR_REPAIR].includes(asset.status as AssetStatus) && (
-                    <div className="mb-6"><RepairStatusCard asset={asset} /></div>
-                )}
+                
                 {activeTab === 'details' && (
                     <div className="space-y-6">
+                        {/* SMART CONTEXT CARD (NEW) */}
+                        <SmartContextCard asset={asset} onShowPreview={onShowPreview} />
+
+                         {/* STOCK INFO CARD */}
+                        <div className={`flex items-start gap-4 p-4 rounded-xl border ${stockStats.inStorage > 0 ? 'bg-blue-50/50 border-blue-200' : 'bg-red-50/50 border-red-200'}`}>
+                            <div className={`p-2 rounded-full ${stockStats.inStorage > 0 ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600'}`}>
+                                <ArchiveBoxIcon className="w-5 h-5" />
+                            </div>
+                            <div className="flex-1">
+                                <h4 className={`text-sm font-bold ${stockStats.inStorage > 0 ? 'text-blue-800' : 'text-red-800'}`}>
+                                    Statistik Stok Gudang
+                                </h4>
+                                <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-6 mt-1">
+                                    <div className="text-xs text-gray-600">
+                                        Unit Sejenis Tersedia: <strong className="text-gray-900">{stockStats.inStorage}</strong> / {stockStats.total}
+                                    </div>
+                                    {stockStats.isMeasurement && (
+                                        <div className="flex items-center gap-1.5 text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
+                                            <BsRulers className="w-3 h-3"/>
+                                            <span>Sisa Isi Unit Ini: <strong>{asset.currentBalance?.toLocaleString('id-ID')}</strong> (Awal: {asset.initialBalance?.toLocaleString('id-ID')})</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
                         <div>
                             <h3 className="text-base font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4">Informasi Dasar</h3>
                             <dl className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
@@ -278,43 +417,109 @@ export const AssetPreview: React.FC<AssetPreviewProps> = ({ asset, canViewPrice,
                         <AssetLabelCard asset={asset} />
                     </div>
                 )}
+                
+                {/* IMPROVED HISTORY TAB */}
                 {activeTab === 'history' && (
-                        <ol className="relative ml-4 border-l border-gray-200">                  
-                        {asset.activityLog.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).map((log) => (
-                        <li key={log.id} className="mb-6 ml-6">
-                            <span className="absolute flex items-center justify-center w-8 h-8 bg-blue-100 rounded-full -left-4 ring-4 ring-white">
-                                {getLogIcon(log.action)}
-                            </span>
-                            <time className="block mb-1 text-xs font-normal leading-none text-gray-500">{new Date(log.timestamp).toLocaleString('id-ID', { dateStyle: 'long', timeStyle: 'short' })}</time>
-                            <h3 className="text-sm font-semibold text-gray-900">{log.action}</h3>
-                            <p className="text-sm font-normal text-gray-600">
-                                {log.details} oleh <ClickableLink onClick={() => onShowPreview({ type: 'user', id: log.user })}>{log.user}</ClickableLink>.
-                            </p>
-                            {log.referenceId && (
-                                <div className="mt-1.5">
-                                    <ClickableLink onClick={() => onShowPreview({ type: log.referenceId?.startsWith('HO') ? 'handover' : log.referenceId?.startsWith('DSM') ? 'dismantle' : 'request', id: log.referenceId! })} title={`Lihat detail untuk ${log.referenceId}`}>
-                                        Lihat Dokumen: {log.referenceId}
-                                    </ClickableLink>
+                    <div className="relative border-l-2 border-gray-200 ml-4 space-y-8">
+                        {asset.activityLog.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).map((log) => {
+                            const { icon: LogIcon, bg, text, border } = getLogStyle(log.action);
+                            
+                            // Determine link target based on referenceId format
+                            const getLinkTarget = (refId: string) => {
+                                if (refId.startsWith('HO')) return 'handover';
+                                if (refId.startsWith('DSM')) return 'dismantle';
+                                if (refId.startsWith('RO') || refId.startsWith('RL') || refId.startsWith('RR')) return 'request';
+                                if (refId.startsWith('INST')) return 'installation';
+                                if (refId.startsWith('MNT')) return 'maintenance';
+                                return null;
+                            };
+                            
+                            const linkType = log.referenceId ? getLinkTarget(log.referenceId) : null;
+
+                            return (
+                                <div key={log.id} className="relative ml-6">
+                                    {/* Timeline Dot */}
+                                    <div className={`absolute -left-[37px] top-1 flex h-8 w-8 items-center justify-center rounded-full border-2 bg-white ${border} ${text}`}>
+                                        <LogIcon className="h-4 w-4" />
+                                    </div>
+                                    
+                                    {/* Content Card */}
+                                    <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm hover:shadow-md transition-shadow">
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-2">
+                                            <h3 className="text-sm font-bold text-gray-900">{log.action}</h3>
+                                            <time className="text-xs text-gray-400 font-mono">
+                                                {new Date(log.timestamp).toLocaleString('id-ID', { dateStyle: 'long', timeStyle: 'short' })}
+                                            </time>
+                                        </div>
+                                        
+                                        <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100/50 mb-3">
+                                            {log.details}
+                                        </div>
+                                        
+                                        <div className="flex items-center justify-between mt-2">
+                                            <div className="flex items-center gap-2 text-xs">
+                                                <div className="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 font-bold text-[10px]">
+                                                    {log.user.charAt(0)}
+                                                </div>
+                                                <span className="font-medium text-gray-500">{log.user}</span>
+                                            </div>
+                                            
+                                            {log.referenceId && linkType && (
+                                                <button 
+                                                    onClick={() => onShowPreview({ type: linkType as any, id: log.referenceId! })} 
+                                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100 hover:text-blue-800 transition-colors"
+                                                >
+                                                    <BsFileEarmarkText className="w-3 h-3"/>
+                                                    Buka Dokumen: {log.referenceId}
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
                                 </div>
-                            )}
-                        </li>
-                        ))}
-                    </ol>
+                            );
+                        })}
+                        {asset.activityLog.length === 0 && (
+                            <div className="ml-6 py-8 text-center text-gray-400 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                                <InfoIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                                Belum ada riwayat aktivitas.
+                            </div>
+                        )}
+                    </div>
                 )}
+
+                {/* IMPROVED ATTACHMENTS TAB */}
                 {activeTab === 'attachments' && (
-                    <div className="space-y-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                         {asset.attachments.length > 0 ? asset.attachments.map(att => (
-                            <div key={att.id} className="flex items-center justify-between p-3 text-sm bg-gray-50 border rounded-lg">
-                                <div>
-                                    <p className="font-semibold text-gray-800">{att.name}</p>
-                                    <p className="text-xs text-gray-500">{att.type === 'image' ? 'Gambar' : 'Dokumen PDF'}</p>
+                            <div key={att.id} className="group relative bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all">
+                                <div className="aspect-w-16 aspect-h-10 bg-gray-100 flex items-center justify-center overflow-hidden">
+                                    {att.type === 'image' ? (
+                                        <img src={att.url} alt={att.name} className="object-cover w-full h-32 group-hover:scale-105 transition-transform duration-500" />
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center h-32 text-gray-400">
+                                            <BsFilePdf className="w-10 h-10 mb-2" />
+                                            <span className="text-[10px] uppercase font-bold">Dokumen</span>
+                                        </div>
+                                    )}
                                 </div>
-                                <div className="flex items-center space-x-2">
-                                    <a href={att.url} target="_blank" rel="noopener noreferrer" className="p-2 text-gray-500 rounded-full hover:bg-gray-200" title="Lihat"><EyeIcon className="w-4 h-4" /></a>
-                                    <a href={att.url} download={att.name} className="p-2 text-gray-500 rounded-full hover:bg-gray-200" title="Unduh"><DownloadIcon className="w-4 h-4" /></a>
+                                <div className="p-3">
+                                    <p className="text-xs font-semibold text-gray-800 truncate mb-2" title={att.name}>{att.name}</p>
+                                    <div className="flex gap-2">
+                                        <a href={att.url} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] font-bold text-gray-600 bg-gray-50 rounded hover:bg-gray-100 hover:text-tm-primary transition-colors border border-gray-200">
+                                            <EyeIcon className="w-3 h-3" /> Lihat
+                                        </a>
+                                        <a href={att.url} download={att.name} className="flex-1 flex items-center justify-center gap-1 py-1.5 text-[10px] font-bold text-gray-600 bg-gray-50 rounded hover:bg-gray-100 hover:text-tm-primary transition-colors border border-gray-200">
+                                            <DownloadIcon className="w-3 h-3" /> Unduh
+                                        </a>
+                                    </div>
                                 </div>
                             </div>
-                        )) : <p className="text-sm text-center text-gray-500 py-4">Tidak ada lampiran.</p>}
+                        )) : (
+                            <div className="col-span-full py-12 text-center text-gray-500 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200">
+                                <BsImage className="w-10 h-10 mx-auto mb-2 text-gray-300" />
+                                <p>Tidak ada lampiran.</p>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

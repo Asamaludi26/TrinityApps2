@@ -217,14 +217,24 @@ const MaintenanceFormPage: React.FC<MaintenanceManagementPageProps> = (props) =>
 
                     materialsToInstall.forEach((newMat) => {
                         const existingMatIndex = updatedMaterials.findIndex(
-                          (em) => em.itemName === newMat.itemName && em.brand === newMat.brand
+                          (em) => em.itemName === newMat.itemName // Match by name only to capture brand changes/upgrades
                         );
                         if (existingMatIndex > -1) {
-                          updatedMaterials[existingMatIndex] = {
-                            ...updatedMaterials[existingMatIndex],
-                            quantity: updatedMaterials[existingMatIndex].quantity + newMat.quantity,
+                            // LOGIC MAINTENANCE: REPLACE / REFRESH
+                            // Berbeda dengan Instalasi baru (Accumulate), Maintenance biasanya mengganti part rusak.
+                            // Kita update tanggal, update brand (jika ganti merk), dan ambil quantity terbesar.
+                            // Contoh: Ganti kabel putus 150m dengan kabel baru 150m -> Tetap 150m (bukan 300m).
+                            updatedMaterials[existingMatIndex] = {
+                                ...updatedMaterials[existingMatIndex],
+                                brand: newMat.brand, // Update brand jika ada penggantian merk
+                                installationDate: newMat.installationDate, // Update tanggal maintenance terakhir
+                                unit: newMat.unit,
+                                // Gunakan quantity terbesar untuk menjaga data aset utama (misal kabel utama)
+                                // Jika hanya splicing (pemakaian sedikit), quantity lama (panjang kabel) tetap dipertahankan.
+                                quantity: Math.max(updatedMaterials[existingMatIndex].quantity, newMat.quantity),
                           };
                         } else {
+                          // Item baru (misal sebelumnya tidak ada pelindung kabel)
                           updatedMaterials.push(newMat);
                         }
                     });

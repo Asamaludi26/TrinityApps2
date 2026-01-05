@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from "react";
 import { User, Page, PreviewData, Asset, Request, LoanRequest, AssetReturn } from "./types";
 
@@ -91,6 +92,12 @@ const AppContent: React.FC = () => {
   const handleShowPreview = (data: PreviewData) => {
     if (data.type === "customer") {
       setActivePage("customer-detail", { customerId: data.id });
+      setPreviewData(null);
+    } else if (data.type === "installation") {
+      setActivePage("customer-installation-form", { openDetailForId: data.id });
+      setPreviewData(null);
+    } else if (data.type === "maintenance") {
+      setActivePage("customer-maintenance-form", { openDetailForId: data.id });
       setPreviewData(null);
     } else {
       setPreviewData(data);

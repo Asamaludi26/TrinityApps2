@@ -2,7 +2,6 @@
 import React, { useMemo, useState } from 'react';
 import { Customer, Asset, Page, PreviewData, AssetCategory, Maintenance, Dismantle, Installation, CustomerStatus } from '../../../types';
 import { DetailPageLayout } from '../../../components/layout/DetailPageLayout';
-import { getStatusClass } from '../list/CustomerListPage';
 import { PencilIcon } from '../../../components/icons/PencilIcon';
 import { CustomerIcon } from '../../../components/icons/CustomerIcon';
 import { WrenchIcon } from '../../../components/icons/WrenchIcon';
@@ -10,6 +9,7 @@ import { ClickableLink } from '../../../components/ui/ClickableLink';
 import { DismantleIcon } from '../../../components/icons/DismantleIcon';
 import { Tooltip } from '../../../components/ui/Tooltip';
 import { HistoryIcon } from '../../../components/icons/HistoryIcon';
+import { BsBoxSeam, BsLightningFill, BsRouter, BsHddNetwork, BsArrowRightShort, BsCalendar3 } from 'react-icons/bs';
 
 // Stores
 import { useMasterDataStore } from '../../../stores/useMasterDataStore';
@@ -31,10 +31,12 @@ interface CustomerDetailPageProps {
     installations?: Installation[];
 }
 
-const DetailItem: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-    <div>
-        <dt className="text-sm font-medium text-gray-500">{label}</dt>
-        <dd className="mt-1 text-base text-gray-900">{children}</dd>
+// --- SUB COMPONENTS (Moved Outside for Performance) ---
+
+const DetailItem: React.FC<{ label: string; children: React.ReactNode; fullWidth?: boolean }> = ({ label, children, fullWidth }) => (
+    <div className={fullWidth ? "sm:col-span-2" : ""}>
+        <dt className="text-xs font-bold text-gray-500 uppercase tracking-wider">{label}</dt>
+        <dd className="mt-1 text-sm font-medium text-gray-900">{children}</dd>
     </div>
 );
 
@@ -47,44 +49,62 @@ const ActivityTimeline: React.FC<{
 }> = ({ customer, maintenances, dismantles, installations, setActivePage }) => {
     
     const activities = useMemo(() => {
-        const allActivities: { date: Date; type: 'Instalasi' | 'Maintenance' | 'Dismantle'; title: string; details: React.ReactNode; onClick: () => void; icon: React.FC<{className?:string}> }[] = [];
+        const allActivities: { date: Date; type: 'Instalasi' | 'Maintenance' | 'Dismantle'; title: string; docNumber: string; details: React.ReactNode; onClick: () => void; icon: React.FC<{className?:string}>; colorClass: string }[] = [];
+
+        // Helper safe date parser
+        const safeDate = (dateStr: string) => {
+            const d = new Date(dateStr);
+            return isNaN(d.getTime()) ? new Date() : d;
+        };
 
         // 1. Installation Activities
         installations.filter(inst => inst.customerId === customer.id).forEach(inst => {
             allActivities.push({
-                date: new Date(inst.installationDate),
+                date: safeDate(inst.installationDate),
                 type: 'Instalasi',
-                title: `Instalasi: ${inst.docNumber}`,
-                details: <><p className="text-xs text-gray-500">Oleh Teknisi: {inst.technician}</p></>,
+                title: `Instalasi Baru`,
+                docNumber: inst.docNumber,
+                details: <p className="text-xs text-gray-500">Teknisi: {inst.technician}</p>,
                 onClick: () => setActivePage('customer-installation-form', { openDetailForId: inst.id }),
                 icon: CustomerIcon,
+                colorClass: "bg-green-100 text-green-600 border-green-200"
             });
         });
 
         // 2. Maintenance Activities
         maintenances.filter(m => m.customerId === customer.id).forEach(m => {
+            const hasReplacement = m.replacements && m.replacements.length > 0;
+            const hasMaterial = m.materialsUsed && m.materialsUsed.length > 0;
+            let typeLabel = "Perbaikan Rutin";
+            if (hasReplacement) typeLabel = "Penggantian Perangkat";
+            else if (hasMaterial) typeLabel = "Penambahan Material";
+
             allActivities.push({
-                date: new Date(m.maintenanceDate),
+                date: safeDate(m.maintenanceDate),
                 type: 'Maintenance',
-                title: `Maintenance: ${m.docNumber}`,
+                title: typeLabel,
+                docNumber: m.docNumber,
                 details: <>
                     <p className="text-xs text-gray-500">Teknisi: {m.technician}</p>
-                    <p className="text-xs text-gray-500 mt-1 italic">"{m.problemDescription}"</p>
+                    <p className="text-xs text-gray-500 mt-1 italic line-clamp-1">"{m.problemDescription}"</p>
                 </>,
                 onClick: () => setActivePage('customer-maintenance-form', { openDetailForId: m.id }),
                 icon: WrenchIcon,
+                colorClass: "bg-blue-100 text-blue-600 border-blue-200"
             });
         });
 
         // 3. Dismantle Activities
         dismantles.filter(d => d.customerId === customer.id).forEach(d => {
             allActivities.push({
-                date: new Date(d.dismantleDate),
+                date: safeDate(d.dismantleDate),
                 type: 'Dismantle',
-                title: `Dismantle: ${d.assetName}`,
-                details: <><p className="text-xs text-gray-500">Teknisi: {d.technician}</p></>,
+                title: `Penarikan Aset`,
+                docNumber: d.docNumber,
+                details: <p className="text-xs text-gray-500">Aset: {d.assetName}</p>,
                 onClick: () => setActivePage('customer-dismantle', { openDetailForId: d.id }),
                 icon: DismantleIcon,
+                colorClass: "bg-red-100 text-red-600 border-red-200"
             });
         });
 
@@ -94,36 +114,47 @@ const ActivityTimeline: React.FC<{
     
     if (activities.length === 0) {
         return (
-            <div className="text-center py-12">
-                <HistoryIcon className="w-12 h-12 mx-auto text-gray-300"/>
-                <h3 className="mt-2 text-sm font-semibold text-gray-900">Tidak Ada Aktivitas</h3>
-                <p className="mt-1 text-sm text-gray-500">Belum ada riwayat aktivitas yang tercatat untuk pelanggan ini.</p>
+            <div className="flex flex-col items-center justify-center py-12 text-center bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                <HistoryIcon className="w-10 h-10 text-gray-300 mb-2"/>
+                <p className="text-sm font-medium text-gray-500">Belum ada riwayat aktivitas.</p>
             </div>
         );
     }
 
     return (
-        <ol className="relative border-l border-gray-200 ml-4">                  
+        <div className="relative border-l-2 border-gray-100 ml-3 space-y-6 py-2">                  
             {activities.map((activity, index) => (
-                <li key={index} className="mb-8 ml-8">
-                    <span className="absolute flex items-center justify-center w-8 h-8 bg-blue-100 rounded-full -left-4 ring-4 ring-white">
-                        <activity.icon className="w-4 h-4 text-tm-primary" />
+                <div key={index} className="relative ml-6 group">
+                    <span className={`absolute flex items-center justify-center w-8 h-8 rounded-full -left-[35px] ring-4 ring-white ${activity.colorClass}`}>
+                        <activity.icon className="w-4 h-4" />
                     </span>
-                    <h3 className="flex items-center text-base font-semibold text-gray-900">
-                        {activity.title}
-                    </h3>
-                    <time className="block mb-2 text-xs font-normal leading-none text-gray-400">
-                        {activity.date.toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                    </time>
-                    <div className="text-sm text-gray-600">{activity.details}</div>
-                     <button onClick={activity.onClick} className="inline-flex items-center mt-3 px-3 py-1.5 text-xs font-medium text-gray-900 bg-white border border-gray-200 rounded-md hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-4 focus:outline-none focus:ring-gray-200 focus:text-blue-700">
-                        Lihat Detail
-                    </button>
-                </li>
+                    <div 
+                        onClick={activity.onClick}
+                        className="p-4 bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md hover:border-tm-primary/30 transition-all cursor-pointer"
+                    >
+                        <div className="flex justify-between items-start mb-2">
+                            <div>
+                                <h3 className="text-sm font-bold text-gray-900">{activity.title}</h3>
+                                <p className="text-xs font-mono text-gray-400 mt-0.5">{activity.docNumber}</p>
+                            </div>
+                            <div className="flex flex-col items-end">
+                                <time className="text-xs font-bold text-gray-500">
+                                    {activity.date.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                </time>
+                                <span className="text-[10px] text-gray-400">{activity.type}</span>
+                            </div>
+                        </div>
+                        <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded-lg border border-gray-100">
+                            {activity.details}
+                        </div>
+                    </div>
+                </div>
             ))}
-        </ol>
+        </div>
     );
 };
+
+// --- MAIN COMPONENT ---
 
 const CustomerDetailPage: React.FC<CustomerDetailPageProps> = ({ initialState, setActivePage, onShowPreview }) => {
     const [activeTab, setActiveTab] = useState<'detail' | 'aktivitas'>('detail');
@@ -139,21 +170,28 @@ const CustomerDetailPage: React.FC<CustomerDetailPageProps> = ({ initialState, s
     const customer = useMemo(() => customers.find(c => c.id === initialState.customerId), [customers, initialState.customerId]);
     const customerAssets = useMemo(() => assets.filter(a => a.currentUser === initialState.customerId), [assets, initialState.customerId]);
 
+    // FIX: Lebih aman dalam mendeteksi Individual vs Bulk
     const individualAssets = useMemo(() => {
         return customerAssets.filter(asset => {
+            // Cek 1: Jika properti balance ada, pasti bulk/measurement
+            if (asset.initialBalance !== undefined && asset.currentBalance !== undefined) return false;
+
+            // Cek 2: Lookup via category/type (Fallback)
             const category = assetCategories.find(c => c.name === asset.category);
-            const type = category?.types.find(t => t.name === asset.type);
-            return type?.trackingMethod !== 'bulk';
+            if (!category) return true; // Default to Individual if category unknown (Safety)
+
+            const type = category.types.find(t => t.name === asset.type);
+            // Default to individual if type not found OR method is individual
+            return !type || type.trackingMethod === 'individual'; 
         });
     }, [customerAssets, assetCategories]);
 
-
     if (!customer) {
         return (
-            <div className="p-8 text-center text-gray-500">
-                Pelanggan tidak ditemukan.
-                <button onClick={() => setActivePage('customers')} className="mt-4 block mx-auto text-tm-primary hover:underline">
-                    Kembali ke Daftar Pelanggan
+            <div className="flex flex-col items-center justify-center h-[50vh] text-gray-500">
+                <p className="text-lg font-medium">Pelanggan tidak ditemukan.</p>
+                <button onClick={() => setActivePage('customers')} className="mt-4 px-4 py-2 bg-white border rounded-lg shadow-sm hover:bg-gray-50 text-sm font-semibold">
+                    Kembali ke Daftar
                 </button>
             </div>
         );
@@ -163,151 +201,204 @@ const CustomerDetailPage: React.FC<CustomerDetailPageProps> = ({ initialState, s
         setActivePage('customer-edit', { customerId: customer.id });
     };
 
-    // Logic Button State
     const hasAssets = customerAssets.length > 0;
+    const hasMaterials = customer.installedMaterials && customer.installedMaterials.length > 0;
+    const canDoMaintenance = hasAssets || hasMaterials; // UX Fix: Boleh maintenance walau cuma ada material
     const isSuspended = customer.status === CustomerStatus.SUSPENDED;
 
-    // Maintenance Logic: Disabled if No Assets OR Suspended
-    const isMaintenanceDisabled = !hasAssets || isSuspended;
-    const maintenanceTooltip = !hasAssets 
-        ? "Pelanggan tidak memiliki aset untuk di-maintenance" 
-        : isSuspended 
-            ? "Tidak dapat melakukan maintenance pada pelanggan berstatus Suspend" 
-            : "Buat laporan maintenance untuk aset pelanggan";
+    // Actions Handlers
+    const handleDirectMaintenance = (assetId: string) => {
+        setActivePage('customer-maintenance-form', { 
+            prefillCustomer: customer.id, 
+            prefillAsset: assetId 
+        });
+    };
 
-    // Dismantle Logic: Disabled ONLY if No Assets (Can dismantle suspended users)
-    const isDismantleDisabled = !hasAssets;
-    const dismantleTooltip = !hasAssets 
-        ? "Pelanggan tidak memiliki aset untuk ditarik" 
-        : "Mulai proses penarikan aset dari pelanggan";
+    const handleDirectDismantle = (assetId: string) => {
+        // Find asset object
+        const asset = assets.find(a => a.id === assetId);
+        if (asset) {
+            setActivePage('customer-dismantle', { prefillAsset: asset });
+        }
+    };
 
     const DetailTabContent = (
-        <div className="space-y-8">
-            {/* Contact Info */}
-            <div className="p-6 bg-white border border-gray-200/80 rounded-xl shadow-sm">
-                <h3 className="text-lg font-semibold text-gray-900 border-b pb-3 mb-4">Informasi Kontak</h3>
-                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
-                    <div className="space-y-4">
-                        <DetailItem label="ID Pelanggan">{customer.id}</DetailItem>
-                        <DetailItem label="Email">{customer.email}</DetailItem>
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            {/* Left Column: Info */}
+            <div className="xl:col-span-1 space-y-6">
+                {/* Profile Card */}
+                <div className="bg-white border border-gray-200/80 rounded-xl shadow-sm overflow-hidden">
+                    <div className="h-24 bg-gradient-to-r from-blue-600 to-indigo-700 relative">
+                        <div className="absolute -bottom-8 left-6">
+                            <div className="w-16 h-16 bg-white rounded-full p-1 shadow-md">
+                                <div className="w-full h-full bg-blue-100 rounded-full flex items-center justify-center text-blue-700 font-bold text-xl">
+                                    {customer.name.charAt(0)}
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div className="space-y-4">
-                        <DetailItem label="Telepon">{customer.phone}</DetailItem>
-                        <DetailItem label="Alamat">{customer.address}</DetailItem>
+                    <div className="pt-10 px-6 pb-6">
+                        <div className="flex justify-between items-start mb-4">
+                            <div>
+                                <h2 className="text-xl font-bold text-gray-900">{customer.name}</h2>
+                                <p className="text-sm text-gray-500 font-mono">{customer.id}</p>
+                            </div>
+                            <span className={`px-2.5 py-1 text-xs font-bold rounded-full border ${
+                                customer.status === CustomerStatus.ACTIVE ? 'bg-green-50 text-green-700 border-green-100' :
+                                customer.status === CustomerStatus.SUSPENDED ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                                'bg-gray-50 text-gray-600 border-gray-100'
+                            }`}>
+                                {customer.status}
+                            </span>
+                        </div>
+                        
+                        <dl className="space-y-4 pt-4 border-t border-gray-100">
+                            <DetailItem label="Paket Layanan">{customer.servicePackage}</DetailItem>
+                            <DetailItem label="Alamat">{customer.address}</DetailItem>
+                            <DetailItem label="Kontak">
+                                <div className="flex flex-col">
+                                    <span>{customer.phone}</span>
+                                    <span className="text-gray-500 text-xs">{customer.email}</span>
+                                </div>
+                            </DetailItem>
+                            <DetailItem label="Tanggal Instalasi">
+                                <div className="flex items-center gap-2">
+                                    <BsCalendar3 className="text-gray-400"/>
+                                    {new Date(customer.installationDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
+                                </div>
+                            </DetailItem>
+                        </dl>
                     </div>
-                </dl>
+                </div>
+            </div>
 
-                {/* Service Info */}
-                 <h3 className="text-lg pt-6 font-semibold text-gray-900 border-b pb-3 mb-4">Informasi Layanan</h3>
-                <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
-                    <DetailItem label="Paket Layanan">{customer.servicePackage}</DetailItem>
-                    <DetailItem label="Tanggal Instalasi">{new Date(customer.installationDate).toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' })}</DetailItem>
-                </dl>
-
-                {/* Installed Devices */}
-                <h3 className="text-lg pt-6 font-semibold text-gray-900 border-b pb-3 mb-4">Aset Terpasang (Perangkat) ({individualAssets.length})</h3>
-                <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama Aset</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID Aset</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Serial Number</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MAC Address</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Kondisi</th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                            {individualAssets.length > 0 ? individualAssets.map(asset => (
-                                <tr key={asset.id} className="hover:bg-gray-50">
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <ClickableLink onClick={() => onShowPreview({ type: 'asset', id: asset.id })}>
-                                            <div className="text-sm font-medium text-gray-900">{asset.name}</div>
-                                        </ClickableLink>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm text-gray-500 font-mono">{asset.id}</div></td>
-                                    <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm text-gray-500 font-mono">{asset.serialNumber || '-'}</div></td>
-                                    <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm text-gray-500 font-mono">{asset.macAddress || '-'}</div></td>
-                                    <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm text-gray-800">{asset.condition}</div></td>
+            {/* Right Column: Assets & Materials */}
+            <div className="xl:col-span-2 space-y-6">
+                
+                {/* 1. DEVICES (Aset Tetap) */}
+                <div className="bg-white border border-gray-200/80 rounded-xl shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                            <BsRouter className="w-5 h-5 text-blue-600" />
+                            <h3 className="font-bold text-gray-800">Perangkat Terpasang</h3>
+                        </div>
+                        <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-0.5 rounded-full">{individualAssets.length} Unit</span>
+                    </div>
+                    
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-white">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Perangkat</th>
+                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Identitas (SN/MAC)</th>
+                                    <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Aksi Cepat</th>
                                 </tr>
-                            )) : (
-                                <tr><td colSpan={5} className="px-6 py-12 text-center text-sm text-gray-500">Tidak ada perangkat terpasang.</td></tr>
-                            )}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {individualAssets.length > 0 ? individualAssets.map(asset => (
+                                    <tr key={asset.id} className="hover:bg-gray-50 transition-colors">
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <div className="flex items-center">
+                                                <div className="flex-shrink-0 h-8 w-8 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600">
+                                                    <BsBoxSeam />
+                                                </div>
+                                                <div className="ml-4">
+                                                    <div className="text-sm font-bold text-gray-900">
+                                                        <ClickableLink onClick={() => onShowPreview({ type: 'asset', id: asset.id })}>{asset.name}</ClickableLink>
+                                                    </div>
+                                                    <div className="text-xs text-gray-500">{asset.brand}</div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <div className="text-xs font-mono text-gray-600 space-y-1">
+                                                <div className="flex gap-2"><span className="text-gray-400 w-8">ID</span> <span>{asset.id}</span></div>
+                                                <div className="flex gap-2"><span className="text-gray-400 w-8">SN</span> <span>{asset.serialNumber || '-'}</span></div>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                            <div className="flex justify-end gap-2">
+                                                {!isSuspended && (
+                                                    <button onClick={() => handleDirectMaintenance(asset.id)} className="p-1.5 text-amber-600 bg-amber-50 hover:bg-amber-100 rounded border border-amber-200 transition-colors" title="Maintenance / Ganti">
+                                                        <WrenchIcon className="w-4 h-4" />
+                                                    </button>
+                                                )}
+                                                <button onClick={() => handleDirectDismantle(asset.id)} className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded border border-red-200 transition-colors" title="Dismantle / Tarik">
+                                                    <DismantleIcon className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                )) : (
+                                    <tr>
+                                        <td colSpan={3} className="px-6 py-10 text-center text-gray-500 bg-gray-50/50">
+                                            Tidak ada perangkat aktif terpasang.
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
 
-                {/* Installed Materials */}
-                <h3 className="text-lg pt-6 font-semibold text-gray-900 border-b pb-3 mb-4">Material Terpasang ({customer.installedMaterials?.length || 0})</h3>
-                <div className="overflow-x-auto">
-                     <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
-                            <tr>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nama Material</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Brand</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Jumlah</th>
-                                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tanggal Pemasangan</th>
-                            </tr>
-                        </thead>
-                        <tbody className="bg-white divide-y divide-gray-200">
-                            {customer.installedMaterials && customer.installedMaterials.length > 0 ? customer.installedMaterials.map((material, index) => {
-                                // FIXED: Lookup logic to properly find StandardItem for quantity conversion
-                                let materialItem: any = null;
-                                let materialType: any = null;
-                                
-                                for (const cat of assetCategories) {
-                                    for (const type of cat.types) {
-                                        const found = type.standardItems?.find(i => i.name === material.itemName && i.brand === material.brand);
-                                        if (found) {
-                                            materialItem = found;
-                                            materialType = type;
-                                            break;
-                                        }
-                                    }
-                                    if (materialItem) break;
-                                }
+                {/* 2. MATERIALS (Infrastruktur) */}
+                <div className="bg-white border border-gray-200/80 rounded-xl shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
+                        <div className="flex items-center gap-2">
+                            <BsHddNetwork className="w-5 h-5 text-orange-600" />
+                            <h3 className="font-bold text-gray-800">Material Terpasang (Infrastruktur)</h3>
+                        </div>
+                        <span className="bg-orange-100 text-orange-800 text-xs font-bold px-2 py-0.5 rounded-full">
+                            {customer.installedMaterials?.length || 0} Item
+                        </span>
+                    </div>
 
-                                let quantityDisplay = `${material.quantity} ${material.unit}`;
-
-                                // Use quantityPerUnit from the StandardItem (Model), not Type
-                                if (materialType?.trackingMethod === 'bulk' && materialItem?.quantityPerUnit && materialItem.quantityPerUnit > 0) {
-                                    const quantityPerUnit = materialItem.quantityPerUnit;
-                                    const totalBaseQuantity = material.quantity; // e.g., 1200 Meter
-
-                                    // Example: 1200 / 1000 = 1 Drum + 200 Meter
-                                    const fullUnits = Math.floor(totalBaseQuantity / quantityPerUnit);
-                                    const remainingBaseUnits = totalBaseQuantity % quantityPerUnit;
-
-                                    const unitOfMeasure = materialItem.unitOfMeasure || materialType.unitOfMeasure || 'unit'; // e.g. Hasbal
-                                    const baseUnitOfMeasure = materialItem.baseUnitOfMeasure || material.unit; // e.g. Meter
-
-                                    const parts = [];
-                                    if (fullUnits > 0) {
-                                        parts.push(`${fullUnits} ${unitOfMeasure}`);
-                                    }
-                                    if (remainingBaseUnits > 0) {
-                                        parts.push(`${remainingBaseUnits} ${baseUnitOfMeasure}`);
-                                    }
-
-                                    if (parts.length > 0) {
-                                        quantityDisplay = parts.join(', ');
-                                    }
-                                }
-                                
-                                return (
-                                <tr key={index} className="hover:bg-gray-50">
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{material.itemName}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{material.brand}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">{quantityDisplay}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{new Date(material.installationDate).toLocaleDateString('id-ID')}</td>
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-white">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Material</th>
+                                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Total Volume</th>
+                                    <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
                                 </tr>
-                                )
-                            }) : (
-                                <tr><td colSpan={4} className="px-6 py-12 text-center text-sm text-gray-500">Tidak ada material yang tercatat.</td></tr>
-                            )}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {customer.installedMaterials && customer.installedMaterials.length > 0 ? customer.installedMaterials.map((material, index) => {
+                                    return (
+                                        <tr key={index} className="hover:bg-gray-50 transition-colors">
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <div className="flex items-center">
+                                                    <div className="flex-shrink-0 h-8 w-8 bg-orange-50 rounded-lg flex items-center justify-center text-orange-600">
+                                                        <BsLightningFill className="w-4 h-4" />
+                                                    </div>
+                                                    <div className="ml-4">
+                                                        <div className="text-sm font-bold text-gray-900">{material.itemName}</div>
+                                                        <div className="text-xs text-gray-500">{material.brand}</div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded text-sm font-medium bg-gray-100 text-gray-800">
+                                                    {material.quantity} {material.unit}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-right">
+                                                <span className="text-xs text-gray-400 italic">Consumed</span>
+                                            </td>
+                                        </tr>
+                                    )
+                                }) : (
+                                    <tr>
+                                        <td colSpan={3} className="px-6 py-10 text-center text-gray-500 bg-gray-50/50">
+                                            Belum ada data material infrastruktur.
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
+
             </div>
         </div>
     );
@@ -315,51 +406,46 @@ const CustomerDetailPage: React.FC<CustomerDetailPageProps> = ({ initialState, s
     const AsideContent = (
          <div className="space-y-6">
             <div className="p-5 bg-white border border-gray-200/80 rounded-xl shadow-sm">
-                <h3 className="text-base font-semibold text-gray-800 mb-3">Status Pelanggan</h3>
-                <span className={`px-2.5 py-1 text-sm font-bold rounded-full ${getStatusClass(customer.status)}`}>
-                    {customer.status}
-                </span>
-                {isSuspended && (
-                    <div className="mt-3 p-3 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-800">
-                        <strong>Perhatian:</strong> Pelanggan ini sedang ditangguhkan. Layanan maintenance dinonaktifkan sementara.
-                    </div>
-                )}
-            </div>
-            <div className="p-5 bg-white border border-gray-200/80 rounded-xl shadow-sm">
-                <h3 className="text-base font-semibold text-gray-800 mb-4">Aksi Cepat</h3>
+                <h3 className="text-sm font-bold text-gray-900 mb-4 uppercase tracking-wider">Aksi Cepat</h3>
                 <div className="space-y-3">
                     <button
                         onClick={() => setActivePage('customer-installation-form', { prefillCustomer: customer.id })}
-                        className="w-full justify-center inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-success rounded-lg shadow-sm hover:bg-green-700"
+                        className="w-full flex items-center justify-between px-4 py-3 text-sm font-bold text-white bg-tm-primary rounded-lg shadow-sm hover:bg-tm-primary-hover transition-all group"
                     >
-                        <CustomerIcon className="w-4 h-4"/>
-                        Instalasi
+                        <div className="flex items-center gap-2">
+                            <CustomerIcon className="w-4 h-4"/>
+                            <span>Instalasi Baru</span>
+                        </div>
+                        <BsArrowRightShort className="w-5 h-5 opacity-70 group-hover:translate-x-1 transition-transform" />
                     </button>
-                    <Tooltip text={maintenanceTooltip}>
+                    
+                    <Tooltip text={isSuspended ? "Pelanggan Suspend tidak dapat di-maintenance" : !canDoMaintenance ? "Tidak ada aset untuk di-maintenance" : "Buat laporan maintenance umum"}>
                         <div className="w-full">
                             <button
                                 onClick={() => setActivePage('customer-maintenance-form', { prefillCustomer: customer.id })}
-                                disabled={isMaintenanceDisabled}
-                                className="w-full justify-center inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-warning-text bg-warning/20 rounded-lg shadow-sm hover:bg-warning/30 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed"
+                                disabled={!canDoMaintenance || isSuspended}
+                                className="w-full flex items-center justify-between px-4 py-3 text-sm font-bold text-gray-700 bg-white border border-gray-200 rounded-lg shadow-sm hover:bg-gray-50 hover:border-gray-300 transition-all disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed group"
                             >
-                                <WrenchIcon className="w-4 h-4"/>
-                                Maintenance
+                                <div className="flex items-center gap-2">
+                                    <WrenchIcon className="w-4 h-4 text-amber-500"/>
+                                    <span>Maintenance Umum</span>
+                                </div>
+                                <BsArrowRightShort className="w-5 h-5 opacity-0 group-hover:opacity-100 transition-opacity" />
                             </button>
                         </div>
                     </Tooltip>
+                </div>
+            </div>
 
-                    <Tooltip text={dismantleTooltip}>
-                        <div className="w-full">
-                            <button
-                                onClick={() => setActivePage('customer-dismantle', { prefillCustomerId: customer.id })}
-                                disabled={isDismantleDisabled}
-                                className="w-full justify-center inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-danger rounded-lg shadow-sm hover:bg-red-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed"
-                            >
-                                <DismantleIcon className="w-4 h-4"/>
-                                Dismantle
-                            </button>
-                        </div>
-                    </Tooltip>
+            <div className="p-5 bg-blue-50 border border-blue-100 rounded-xl shadow-sm">
+                <h3 className="text-xs font-bold text-blue-800 mb-2 uppercase">Statistik Aset</h3>
+                <div className="flex justify-between items-center text-sm mb-1">
+                    <span className="text-blue-600">Total Perangkat</span>
+                    <span className="font-bold text-blue-900">{individualAssets.length}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                    <span className="text-blue-600">Material Item</span>
+                    <span className="font-bold text-blue-900">{customer.installedMaterials?.length || 0}</span>
                 </div>
             </div>
         </div>
@@ -371,40 +457,41 @@ const CustomerDetailPage: React.FC<CustomerDetailPageProps> = ({ initialState, s
             onBack={() => setActivePage('customers')}
             aside={AsideContent}
             headerActions={
-                <button onClick={handleEditClick} className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-tm-primary rounded-lg shadow-sm hover:bg-tm-primary-hover">
+                <button onClick={handleEditClick} className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50">
                     <PencilIcon className="w-4 h-4" />
-                    Edit
+                    Edit Profil
                 </button>
             }
         >
             <div className="border-b border-gray-200 mb-6">
-                <nav className="-mb-px flex space-x-6" aria-label="Tabs">
+                <nav className="-mb-px flex space-x-8" aria-label="Tabs">
                     <button
                         onClick={() => setActiveTab('detail')}
-                        className={`py-3 px-1 border-b-2 text-sm font-medium ${
+                        className={`py-4 px-1 border-b-2 font-bold text-sm transition-all ${
                             activeTab === 'detail'
                                 ? 'border-tm-primary text-tm-primary'
                                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                         }`}
                     >
-                        Detail
+                        Overview & Aset
                     </button>
                     <button
                         onClick={() => setActiveTab('aktivitas')}
-                        className={`py-3 px-1 border-b-2 text-sm font-medium ${
+                        className={`py-4 px-1 border-b-2 font-bold text-sm transition-all ${
                             activeTab === 'aktivitas'
                                 ? 'border-tm-primary text-tm-primary'
                                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                         }`}
                     >
-                        Aktivitas
+                        Riwayat Aktivitas
                     </button>
                 </nav>
             </div>
 
             {activeTab === 'detail' && DetailTabContent}
             {activeTab === 'aktivitas' && (
-                <div className="p-6 bg-white border border-gray-200/80 rounded-xl shadow-sm">
+                <div className="bg-white border border-gray-200/80 rounded-xl shadow-sm p-6">
+                    <h3 className="text-lg font-bold text-gray-900 mb-6">Jejak Aktivitas Pelanggan</h3>
                     <ActivityTimeline 
                         customer={customer}
                         maintenances={maintenances}

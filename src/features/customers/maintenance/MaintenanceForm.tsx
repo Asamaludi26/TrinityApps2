@@ -17,7 +17,7 @@ import { useNotification } from '../../../providers/NotificationProvider';
 import { useCustomerAssetLogic } from '../hooks/useCustomerAssetLogic';
 import FloatingActionBar from '../../../components/ui/FloatingActionBar';
 import { MaterialAllocationModal } from '../../../components/ui/MaterialAllocationModal';
-import { BsBoxSeam, BsWrench, BsLightningFill } from 'react-icons/bs';
+import { BsBoxSeam, BsWrench, BsLightningFill, BsArrowDown } from 'react-icons/bs';
 
 interface MaintenanceFormProps {
     currentUser: User;
@@ -90,12 +90,15 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
         return () => { if (currentRef) observer.unobserve(currentRef); };
     }, []);
 
+    // FIX: Prefill Logic - Use Set State instead of Toggle to prevent double-toggle bugs
     useEffect(() => {
         if (prefillCustomerId) {
             setSelectedCustomerId(prefillCustomerId);
             const customerAssets = getCustomerAssets(prefillCustomerId);
+            
+            // Only auto-select if a specific asset wasn't requested AND there's only 1 asset
             if (!prefillAssetId && customerAssets.length === 1) {
-                handleAssetSelection(customerAssets[0].id);
+                 setSelectedAssetIds([customerAssets[0].id]);
             }
         }
     }, [prefillCustomerId, prefillAssetId, getCustomerAssets]);
@@ -105,7 +108,11 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
             const asset = assets.find(a => a.id === prefillAssetId);
             if (asset && asset.currentUser) {
                 setSelectedCustomerId(asset.currentUser);
-                handleAssetSelection(prefillAssetId);
+                // Ensure ID is added without toggling off if already present
+                setSelectedAssetIds(prev => {
+                    if (prev.includes(prefillAssetId)) return prev;
+                    return [...prev, prefillAssetId];
+                });
             }
         }
     }, [prefillAssetId, assets]);
@@ -204,6 +211,29 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
     
     const addAdditionalMaterial = () => {
         setAdditionalMaterials(prev => [...prev, { id: Date.now(), modelKey: '', quantity: 1, unit: 'Pcs' }]);
+    };
+
+    // LOGIC: Import installed material to maintenance list
+    const handleMaintainMaterial = (installed: { itemName: string, brand: string, unit: string, quantity: number }) => {
+        const key = `${installed.itemName}|${installed.brand}`;
+        
+        // Cek jika sudah ada di list
+        const exists = additionalMaterials.some(m => m.modelKey === key);
+        if (exists) {
+            addNotification('Material ini sudah ada dalam daftar maintenance.', 'info');
+            return;
+        }
+
+        // Add to list, default quantity is current quantity (assumption: replace/check), can be edited
+        setAdditionalMaterials(prev => [...prev, {
+            id: Date.now(),
+            modelKey: key,
+            quantity: installed.quantity, // Default to existing quantity
+            unit: installed.unit,
+            materialAssetId: undefined
+        }]);
+
+        // Auto scroll to materials section if needed (Optional UX)
     };
     
     const removeAdditionalMaterial = (id: number) => {
@@ -364,7 +394,7 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                     </div>
                 </section>
 
-                {/* Asset Details Section */}
+                {/* Asset Details Section (DEVICE) */}
                  <section>
                     <h4 className="font-semibold text-gray-800 border-b pb-1 mb-4 flex items-center gap-2">
                          <BsBoxSeam className="text-tm-primary"/> Perangkat Terpasang (Pengecekan)
@@ -392,12 +422,26 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
 
                                         return (
                                             <React.Fragment key={asset.id}>
-                                                <tr className={`${isSelected ? 'bg-blue-50/70' : 'hover:bg-gray-50/70'} transition-colors`}>
-                                                    <td className="px-4 py-3 text-center align-top"><Checkbox id={`asset-select-${asset.id}`} checked={isSelected} onChange={() => handleAssetSelection(asset.id)} /></td>
+                                                <tr 
+                                                    className={`${isSelected ? 'bg-blue-50/70' : 'hover:bg-gray-50/70'} transition-colors cursor-pointer`}
+                                                    onClick={() => handleAssetSelection(asset.id)}
+                                                >
+                                                    <td className="px-4 py-3 text-center align-top" onClick={(e) => e.stopPropagation()}>
+                                                        <Checkbox 
+                                                            id={`asset-select-${asset.id}`} 
+                                                            checked={isSelected} 
+                                                            onChange={() => handleAssetSelection(asset.id)} 
+                                                        />
+                                                    </td>
                                                     <td className="px-4 py-3 font-semibold text-gray-900 align-top">{asset.name}</td>
                                                     <td className="px-4 py-3 font-mono text-xs text-gray-500 align-top">{asset.id} <br /> SN: {asset.serialNumber || '-'}</td>
                                                     <td className="px-4 py-3 text-center align-top">
-                                                        <button type="button" onClick={() => toggleReplacement(asset.id)} disabled={!isSelected} className={`px-3 py-1.5 text-xs font-semibold text-white rounded-md shadow-sm transition-colors ${isReplacingThis ? 'bg-red-500 hover:bg-red-600' : 'bg-tm-accent hover:bg-tm-primary'} disabled:bg-gray-300 disabled:cursor-not-allowed`}>
+                                                        <button 
+                                                            type="button" 
+                                                            onClick={(e) => { e.stopPropagation(); toggleReplacement(asset.id); }} 
+                                                            disabled={!isSelected} 
+                                                            className={`px-3 py-1.5 text-xs font-semibold text-white rounded-md shadow-sm transition-colors ${isReplacingThis ? 'bg-red-500 hover:bg-red-600' : 'bg-tm-accent hover:bg-tm-primary'} disabled:bg-gray-300 disabled:cursor-not-allowed`}
+                                                        >
                                                             {isReplacingThis ? 'Batal Ganti' : 'Ganti Perangkat'}
                                                         </button>
                                                     </td>
@@ -438,17 +482,77 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                     </div>
                 </section>
                 
-                {/* NEW Material Section */}
+                {/* NEW: Material Terpasang (Source Logic) */}
                 <section>
                     <h4 className="font-semibold text-gray-800 border-b pb-1 mb-4 flex items-center gap-2">
-                        <BsLightningFill className="text-orange-500"/> Material Tambahan / Sparepart
+                        <BsLightningFill className="text-orange-600"/> Material Terpasang (Infrastruktur)
+                    </h4>
+                     <div className="overflow-x-auto border border-gray-200 rounded-xl shadow-sm bg-white mb-6">
+                        <table className="min-w-full text-sm divide-y divide-gray-200">
+                            <thead className="bg-gray-100">
+                                <tr>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Item</th>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Terpasang</th>
+                                    <th className="w-32 px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider">Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {selectedCustomer?.installedMaterials && selectedCustomer.installedMaterials.length > 0 ? (
+                                    selectedCustomer.installedMaterials.map((mat, idx) => {
+                                        const isAlreadyAdded = additionalMaterials.some(m => m.modelKey === `${mat.itemName}|${mat.brand}`);
+                                        return (
+                                            <tr key={idx} className="hover:bg-gray-50">
+                                                <td className="px-4 py-3">
+                                                    <span className="font-semibold text-gray-900">{mat.itemName}</span>
+                                                    <span className="text-xs text-gray-500 block">{mat.brand}</span>
+                                                </td>
+                                                <td className="px-4 py-3 text-sm text-gray-700">
+                                                    {mat.quantity} {mat.unit}
+                                                </td>
+                                                <td className="px-4 py-3 text-center">
+                                                     <button 
+                                                        type="button" 
+                                                        onClick={() => handleMaintainMaterial(mat)} 
+                                                        disabled={isAlreadyAdded}
+                                                        className={`px-3 py-1.5 text-xs font-semibold rounded-md shadow-sm transition-colors border flex items-center justify-center gap-1 mx-auto
+                                                            ${isAlreadyAdded 
+                                                                ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' 
+                                                                : 'bg-white text-orange-600 border-orange-200 hover:bg-orange-50'
+                                                            }`}
+                                                    >
+                                                        {isAlreadyAdded ? 'Ditambahkan' : (
+                                                            <>
+                                                                Maintenance <BsArrowDown />
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
+                                ) : (
+                                    <tr>
+                                        <td colSpan={3} className="px-6 py-8 text-center text-gray-500 bg-gray-50/50 italic">
+                                            Belum ada material infrastruktur yang terdata pada pelanggan ini.
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                {/* NEW Material Section (Used) */}
+                <section>
+                    <h4 className="font-semibold text-gray-800 border-b pb-1 mb-4 flex items-center gap-2">
+                        <BsWrench className="text-gray-500"/> Material Digunakan / Sparepart (Input)
                     </h4>
                     <div className="border border-gray-200 rounded-xl shadow-sm overflow-hidden">
                         <table className="min-w-full text-sm divide-y divide-gray-200">
                              <thead className="bg-gray-100">
                                 <tr>
                                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase w-5/12">Material Name</th>
-                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase w-2/12">Qty</th>
+                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase w-2/12">Qty Digunakan</th>
                                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase w-4/12">Sumber Stok</th>
                                     <th className="w-10"></th>
                                 </tr>
@@ -476,7 +580,8 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                                                     type="number" 
                                                     value={material.quantity} 
                                                     onChange={e => handleMaterialChange(material.id, 'quantity', e.target.value)} 
-                                                    min="1" 
+                                                    min="0.1" 
+                                                    step="0.1"
                                                     className="block w-full px-3 py-2 text-sm text-gray-900 bg-white border border-gray-300 rounded-lg shadow-sm pr-10"
                                                     placeholder="0"
                                                 />
@@ -496,7 +601,7 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                                                 title="Pilih sumber stok spesifik (Drum/Box)"
                                             >
                                                 <ArchiveBoxIcon className="w-3.5 h-3.5" />
-                                                {material.materialAssetId ? 'Ubah Sumber' : 'Otomatis (FIFO)'}
+                                                {material.materialAssetId ? 'Ubah' : 'Otomatis (FIFO)'}
                                             </button>
                                         </td>
                                         <td className="px-4 py-3 text-center align-top">
@@ -508,7 +613,7 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                         </table>
                         <div className="bg-gray-50 p-2 border-t text-center">
                             <button type="button" onClick={() => addAdditionalMaterial()} className="inline-flex items-center gap-1 text-xs font-semibold text-tm-primary hover:underline">
-                                <PlusIcon className="w-3 h-3"/> Tambah Material
+                                <PlusIcon className="w-3 h-3"/> Tambah Baris Manual
                             </button>
                         </div>
                     </div>

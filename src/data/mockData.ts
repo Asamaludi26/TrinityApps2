@@ -142,12 +142,63 @@ export const mockAssets: Asset[] = [
     { id: 'AST-001', name: 'Mikrotik CCR1009', category: 'Perangkat Jaringan (Core)', type: 'Router Core', brand: 'Mikrotik', serialNumber: 'SN-MK-001', status: AssetStatus.IN_STORAGE, condition: AssetCondition.BRAND_NEW, location: 'Gudang Utama', registrationDate: d(-10), recordedBy: 'Admin Logistik', purchasePrice: 7500000, attachments: [], activityLog: [] },
     { id: 'AST-002', name: 'Huawei HG8245H', category: 'Perangkat Pelanggan (CPE)', type: 'ONT/ONU', brand: 'Huawei', serialNumber: 'SN-HW-A01', status: AssetStatus.IN_STORAGE, condition: AssetCondition.GOOD, location: 'Rak A-2', registrationDate: d(-20), recordedBy: 'Admin Logistik', purchasePrice: 450000, attachments: [], activityLog: [] },
     
-    // B. IN_USE (Internal & Customer)
-    { id: 'AST-003', name: 'Fusion Splicer 90S', category: 'Alat Kerja', type: 'Splicer', brand: 'Fujikura', serialNumber: 'SN-FJ-99', status: AssetStatus.IN_USE, condition: AssetCondition.GOOD, currentUser: 'Staff Teknisi', location: 'Mobil Tim 1', registrationDate: d(-100), recordedBy: 'Admin Logistik', purchasePrice: 85000000, attachments: [], activityLog: [] },
+    // B. IN_USE (Complex History: Splicer)
+    { 
+        id: 'AST-003', 
+        name: 'Fusion Splicer 90S', 
+        category: 'Alat Kerja', 
+        type: 'Splicer', 
+        brand: 'Fujikura', 
+        serialNumber: 'SN-FJ-99', 
+        status: AssetStatus.IN_USE, 
+        condition: AssetCondition.GOOD, 
+        currentUser: 'Staff Teknisi', 
+        location: 'Mobil Tim 1', 
+        registrationDate: d(-365), 
+        recordedBy: 'Admin Logistik', 
+        purchasePrice: 85000000, 
+        attachments: [
+            { id: 1, name: 'Invoice_Pembelian.pdf', url: '#', type: 'pdf' },
+            { id: 2, name: 'Foto_Fisik_Baru.jpg', url: 'https://via.placeholder.com/300x200.png?text=Fisik+Baru', type: 'image' },
+            { id: 3, name: 'Laporan_Service_Nov.pdf', url: '#', type: 'pdf' }
+        ], 
+        activityLog: [
+            { id: 1, action: 'Aset Dicatat', user: 'Admin Logistik', timestamp: d(-365), details: 'Pembelian awal dari Vendor GlobalTek.', referenceId: 'PO-001' },
+            { id: 2, action: 'Serah Terima Internal', user: 'Admin Logistik', timestamp: d(-360), details: 'Diserahkan ke Staff Teknisi untuk operasional.', referenceId: generateId('HO', -360, '0001') },
+            { id: 3, action: 'Kerusakan Dilaporkan', user: 'Staff Teknisi', timestamp: d(-180), details: 'Motor pemotong tidak presisi. Perlu kalibrasi.', referenceId: '' },
+            { id: 4, action: 'Proses Perbaikan Dimulai', user: 'Admin Logistik', timestamp: d(-178), details: 'Dikirim ke Service Center Resmi Fujikura.', referenceId: 'REP-001' },
+            { id: 5, action: 'Perbaikan Selesai', user: 'Admin Logistik', timestamp: d(-170), details: 'Unit diterima kembali. Kalibrasi selesai. Biaya Rp 2.500.000.', referenceId: 'REP-001' },
+            { id: 6, action: 'Serah Terima Internal', user: 'Admin Logistik', timestamp: d(-169), details: 'Diserahkan kembali ke Staff Teknisi.', referenceId: generateId('HO', -169, '0002') },
+        ] 
+    },
+    
+    // B. IN_USE (Customer)
     { id: 'AST-004', name: 'ZTE F609', category: 'Perangkat Pelanggan (CPE)', type: 'ONT/ONU', brand: 'ZTE', serialNumber: 'SN-ZTE-55', status: AssetStatus.IN_USE, condition: AssetCondition.USED_OKAY, currentUser: 'CUST-001', location: 'Terpasang di: PT. Maju Jaya', registrationDate: d(-50), recordedBy: 'Admin Logistik', purchasePrice: 300000, attachments: [], activityLog: [] },
 
     // C. DAMAGED / REPAIR
-    { id: 'AST-005', name: 'OTDR MaxTester', category: 'Alat Kerja', type: 'OTDR', brand: 'Exfo', serialNumber: 'SN-EX-88', status: AssetStatus.DAMAGED, condition: AssetCondition.MAJOR_DAMAGE, location: 'Meja Teknisi', registrationDate: d(-200), recordedBy: 'Admin Logistik', purchasePrice: 45000000, notes: 'Layar pecah terjatuh', attachments: [], activityLog: [{ id: 1, action: 'Kerusakan Dilaporkan', user: 'Staff Teknisi', timestamp: d(-1), details: 'Layar pecah saat operasional.' }] },
+    { 
+        id: 'AST-005', 
+        name: 'OTDR MaxTester', 
+        category: 'Alat Kerja', 
+        type: 'OTDR', 
+        brand: 'Exfo', 
+        serialNumber: 'SN-EX-88', 
+        status: AssetStatus.DAMAGED, 
+        condition: AssetCondition.MAJOR_DAMAGE, 
+        location: 'Meja Teknisi', 
+        registrationDate: d(-200), 
+        recordedBy: 'Admin Logistik', 
+        purchasePrice: 45000000, 
+        notes: 'Layar pecah terjatuh', 
+        attachments: [
+            { id: 1, name: 'Bukti_Kerusakan_Layar.jpg', url: 'https://via.placeholder.com/300x200.png?text=Layar+Pecah', type: 'image' }
+        ], 
+        activityLog: [
+            { id: 1, action: 'Aset Dicatat', user: 'Admin Logistik', timestamp: d(-200), details: 'Unit baru.', referenceId: 'PO-005' },
+            { id: 2, action: 'Kerusakan Dilaporkan', user: 'Staff Teknisi', timestamp: d(-1), details: 'Layar pecah saat operasional karena terjatuh.', referenceId: '' }
+        ] 
+    },
+    
     { id: 'AST-006', name: 'Mikrotik CCR1009', category: 'Perangkat Jaringan (Core)', type: 'Router Core', brand: 'Mikrotik', serialNumber: 'SN-MK-002', status: AssetStatus.OUT_FOR_REPAIR, condition: AssetCondition.MINOR_DAMAGE, location: 'Service Center Jakarta', registrationDate: d(-150), recordedBy: 'Admin Logistik', purchasePrice: 7500000, attachments: [], activityLog: [{ id: 2, action: 'Proses Perbaikan Dimulai', user: 'Admin Logistik', timestamp: d(-5), details: 'Dikirim ke vendor service.' }] },
 
     // E. MATERIAL (Bulk Item) - Updated with balances
@@ -304,9 +355,9 @@ export const mockReturns: AssetReturn[] = [
 // --- 8. TRANSACTIONS (HO, DSM, MNT, INST) ---
 export const mockHandovers: Handover[] = [
     { 
-        id: generateId('HO', -100, '0001'), 
-        docNumber: generateId('HO', -100, '0001'), 
-        handoverDate: d(-100), 
+        id: generateId('HO', -360, '0001'), 
+        docNumber: generateId('HO', -360, '0001'), 
+        handoverDate: d(-360), 
         menyerahkan: 'Admin Logistik', penerima: 'Staff Teknisi', mengetahui: 'Super Admin', 
         items: [{ id: 1, itemName: 'Fusion Splicer 90S', itemTypeBrand: 'Fujikura', conditionNotes: 'Baru', quantity: 1, checked: true, assetId: 'AST-003' }], 
         status: ItemStatus.COMPLETED 
