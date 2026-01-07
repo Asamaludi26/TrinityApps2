@@ -19,6 +19,7 @@ import { SpinnerIcon } from '../../../../components/icons/SpinnerIcon';
 import { Letterhead } from '../../../../components/ui/Letterhead';
 import { SignatureStamp } from '../../../../components/ui/SignatureStamp';
 import { DownloadIcon } from '../../../../components/icons/DownloadIcon';
+import { Tooltip } from '../../../../components/ui/Tooltip';
 import { 
   BsBoxSeam, 
   BsFileEarmarkPdf, 
@@ -31,7 +32,8 @@ import {
   BsCart,
   BsPerson,
   BsBuilding,
-  BsInfoCircle
+  BsInfoCircle,
+  BsExclamationTriangleFill
 } from 'react-icons/bs';
 import DatePicker from '../../../../components/ui/DatePicker';
 import { useAssetStore } from '../../../../stores/useAssetStore';
@@ -85,6 +87,7 @@ export const RequestForm: React.FC<RequestFormProps> = ({
   const [requestDate, setRequestDate] = useState<Date | null>(new Date());
   
   const updateCategories = useAssetStore((state) => state.updateCategories);
+  const checkAvailability = useAssetStore((state) => state.checkAvailability); // Access ATP Logic
   
   const formRef = useRef<HTMLDivElement>(null);
   const addNotification = useNotification();
@@ -154,53 +157,74 @@ export const RequestForm: React.FC<RequestFormProps> = ({
     if (items.length > 1) setItems(prev => prev.filter(i => i.id !== id));
   };
 
+  // --- SMART UPDATE STATE with ATP LOGIC ---
   const updateItemState = useCallback((id: number, updates: Partial<RequestItemFormState>) => {
     setItems(prev => prev.map(item => {
       if (item.id === id) {
-        const newItem = { ...item, ...updates };
+        // Merge updates
+        const nextItem = { ...item, ...updates };
         
+        // 1. Reset logic jika kategori/tipe berubah
         if ('tempCategoryId' in updates && updates.tempCategoryId !== item.tempCategoryId) {
-            newItem.tempTypeId = ''; newItem.itemName = ''; newItem.itemTypeBrand = ''; newItem.availableStock = 0;
+            nextItem.tempTypeId = ''; nextItem.itemName = ''; nextItem.itemTypeBrand = ''; 
+            nextItem.availableStock = 0; nextItem.stockDetails = undefined;
         }
         
         if ('tempTypeId' in updates && updates.tempTypeId !== item.tempTypeId) {
-            newItem.itemName = ''; newItem.itemTypeBrand = ''; newItem.availableStock = 0;
-            const cat = assetCategories.find(c => c.id.toString() === newItem.tempCategoryId);
+            nextItem.itemName = ''; nextItem.itemTypeBrand = ''; 
+            nextItem.availableStock = 0; nextItem.stockDetails = undefined;
+            const cat = assetCategories.find(c => c.id.toString() === nextItem.tempCategoryId);
             const typeData = cat?.types.find(t => t.id.toString() === updates.tempTypeId);
-            newItem.unit = typeData?.unitOfMeasure || 'Unit';
+            nextItem.unit = typeData?.unitOfMeasure || 'Unit';
         }
 
+        // 2. TRIGGER ATP CHECK (Jika Nama, Brand, atau Qty berubah)
+        // Kita perlu mengecek ketersediaan baru setiap kali user mengubah item atau JUMLAH (untuk fragmentasi)
+        const nameToCheck = 'itemName' in updates ? updates.itemName : item.itemName;
+        const brandToCheck = 'itemTypeBrand' in updates ? updates.itemTypeBrand : item.itemTypeBrand;
+        const qtyToCheck = 'quantity' in updates ? updates.quantity : item.quantity;
+
+        // Model Auto-Fill Logic (Only if itemName changed)
         if ('itemName' in updates && updates.itemName) {
-          const cat = assetCategories.find(c => c.id.toString() === newItem.tempCategoryId);
-          const typeData = cat?.types.find(t => t.id.toString() === newItem.tempTypeId);
-          const modelData = typeData?.standardItems?.find(m => m.name === updates.itemName);
-          
-          if (modelData) {
-              newItem.itemTypeBrand = modelData.brand || '';
-              newItem.availableStock = assets.filter(a => a.name === updates.itemName && a.brand === newItem.itemTypeBrand && a.status === AssetStatus.IN_STORAGE).length;
-          } else {
-              newItem.availableStock = 0;
-          }
+           const cat = assetCategories.find(c => c.id.toString() === nextItem.tempCategoryId);
+           const typeData = cat?.types.find(t => t.id.toString() === nextItem.tempTypeId);
+           const modelData = typeData?.standardItems?.find(m => m.name === updates.itemName);
+           
+           if (modelData) {
+               // Auto fill brand from master data if available
+               nextItem.itemTypeBrand = modelData.brand || '';
+           }
         }
         
-        return newItem;
+        // Final Stock Check
+        // Gunakan brand terbaru (bisa dari auto-fill di atas atau input manual user)
+        const finalBrand = nextItem.itemTypeBrand;
+        
+        if (nameToCheck && finalBrand) {
+             const stockInfo = checkAvailability(nameToCheck, finalBrand, Number(qtyToCheck));
+             nextItem.availableStock = stockInfo.available;
+             nextItem.stockDetails = {
+                 physical: stockInfo.physical,
+                 reserved: stockInfo.reserved,
+                 isFragmented: stockInfo.isFragmented
+             };
+        } else {
+             nextItem.availableStock = 0;
+             nextItem.stockDetails = undefined;
+        }
+        
+        return nextItem;
       }
       return item;
     }));
-  }, [assetCategories, assets]);
+  }, [assetCategories, checkAvailability]);
 
   const fulfillmentStatus = useMemo(() => {
       if (items.some(i => !i.itemName || i.quantity <= 0)) return 'invalid';
-      const allInStock = items.every(item => {
-          const actualStock = assets.filter(a => 
-             a.name === item.itemName && 
-             a.brand === item.itemTypeBrand && 
-             a.status === AssetStatus.IN_STORAGE
-          ).length;
-          return actualStock >= item.quantity;
-      });
+      // Use the calculated ATP from item state
+      const allInStock = items.every(item => item.availableStock >= item.quantity && !item.stockDetails?.isFragmented);
       return allInStock ? 'stock' : 'procurement';
-  }, [items, assets]);
+  }, [items]);
 
   const handleCategorySelect = async (itemId: number, value: string) => {
     if (!value.trim()) return;
@@ -327,7 +351,7 @@ export const RequestForm: React.FC<RequestFormProps> = ({
     localStorage.removeItem(userDraftKey);
     window.dispatchEvent(new Event('storage'));
     
-    const cleanItems: RequestItem[] = items.map(({ tempCategoryId, tempTypeId, availableStock, unit, ...rest }) => ({
+    const cleanItems: RequestItem[] = items.map(({ tempCategoryId, tempTypeId, availableStock, unit, stockDetails, ...rest }) => ({
         ...rest,
         categoryId: tempCategoryId,
         typeId: tempTypeId
@@ -447,9 +471,6 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                                   <option value="Project Based">Project Based</option>
                               </select>
                           </div>
-
-                      
-
                       </div>
 
                   </div>
@@ -485,6 +506,12 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                           const currentType = availableTypes.find(t => t.id.toString() === item.tempTypeId);
                           const availableModels = currentType?.standardItems || [];
                           const isNewType = currentType && Date.now() - currentType.id < 60000;
+                          
+                          // Smart Stock Info
+                          const hasStock = item.availableStock > 0;
+                          const isFragmented = item.stockDetails?.isFragmented;
+                          const reservedStock = item.stockDetails?.reserved || 0;
+                          const physicalStock = item.stockDetails?.physical || 0;
 
                           return (
                               <div key={item.id} className="group relative bg-white border border-slate-200 rounded-lg shadow-sm hover:border-tm-primary/40 hover:shadow-md transition-all p-4">
@@ -500,9 +527,43 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                                               <div className="col-span-12 sm:col-span-4"><label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">Model</label><CreatableSelect options={availableModels.map(m => m.name)} value={item.itemName} onChange={(val) => handleModelSelect(item.id, item.tempCategoryId, item.tempTypeId, val)} placeholder="Pilih Model" disabled={!item.tempTypeId} /></div>
                                           </div>
                                           <div className="grid grid-cols-12 gap-3 items-start">
-                                              <div className="col-span-12 sm:col-span-4"><label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">Brand</label><input type="text" value={item.itemTypeBrand} onChange={e => updateItemState(item.id, { itemTypeBrand: e.target.value })} placeholder="Cth: Mikrotik" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700 focus:bg-white focus:border-tm-primary outline-none transition-colors" /></div>
-                                              <div className="col-span-8 sm:col-span-6"><label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">Keterangan</label><input type="text" value={item.keterangan} onChange={e => updateItemState(item.id, { keterangan: e.target.value })} placeholder="Spesifikasi / Keperluan..." className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700 focus:bg-white focus:border-tm-primary outline-none transition-colors placeholder:text-slate-400" /></div>
-                                              <div className="col-span-4 sm:col-span-2 relative group/qty">
+                                              <div className="col-span-12 sm:col-span-3"><label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">Brand</label><input type="text" value={item.itemTypeBrand} onChange={e => updateItemState(item.id, { itemTypeBrand: e.target.value })} placeholder="Cth: Mikrotik" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700 focus:bg-white focus:border-tm-primary outline-none transition-colors" /></div>
+                                              
+                                              {/* SMART STOCK DISPLAY */}
+                                              <div className="col-span-4 sm:col-span-2">
+                                                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5 text-center">Stok (ATP)</label>
+                                                <div className="relative group/stock">
+                                                     <input 
+                                                        type="text" 
+                                                        readOnly 
+                                                        value={item.availableStock} 
+                                                        className={`w-full px-3 py-2 border rounded-md text-sm font-bold text-center cursor-default focus:outline-none 
+                                                            ${hasStock ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-100 border-slate-200 text-slate-400'}
+                                                            ${isFragmented ? 'border-amber-400 bg-amber-50 text-amber-800' : ''}
+                                                        `} 
+                                                     />
+                                                     
+                                                     {/* Conditional Warning Icons */}
+                                                     {isFragmented && (
+                                                         <BsExclamationTriangleFill className="absolute top-1/2 -translate-y-1/2 right-2 text-amber-500 w-3.5 h-3.5" />
+                                                     )}
+                                                     {reservedStock > 0 && !isFragmented && (
+                                                         <BsInfoCircle className="absolute top-1/2 -translate-y-1/2 right-2 text-blue-400 w-3.5 h-3.5" />
+                                                     )}
+
+                                                     {/* Tooltip Hover */}
+                                                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-slate-800 text-white text-[10px] rounded shadow-lg opacity-0 group-hover/stock:opacity-100 transition-opacity pointer-events-none z-20">
+                                                        <div className="font-bold border-b border-slate-600 pb-1 mb-1">Status Stok</div>
+                                                        <div className="flex justify-between"><span>Fisik Gudang:</span> <span className="font-mono">{physicalStock}</span></div>
+                                                        <div className="flex justify-between text-amber-300"><span>Sedang Dipesan:</span> <span className="font-mono">{reservedStock}</span></div>
+                                                        <div className="flex justify-between border-t border-slate-600 pt-1 mt-1"><span>Tersedia (ATP):</span> <span className="font-bold text-emerald-400 font-mono">{item.availableStock}</span></div>
+                                                        {isFragmented && <div className="mt-1 text-amber-400 italic">⚠️ Stok terpecah/fragmented.</div>}
+                                                     </div>
+                                                </div>
+                                              </div>
+
+                                              <div className="col-span-8 sm:col-span-5"><label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">Keterangan</label><input type="text" value={item.keterangan} onChange={e => updateItemState(item.id, { keterangan: e.target.value })} placeholder="Spesifikasi / Keperluan..." className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700 focus:bg-white focus:border-tm-primary outline-none transition-colors placeholder:text-slate-400" /></div>
+                                              <div className="col-span-12 sm:col-span-2 relative group/qty">
                                                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5 text-center">Jumlah</label>
                                                   <div className="relative">
                                                     <input type="number" value={item.quantity} onChange={e => updateItemState(item.id, { quantity: parseInt(e.target.value) || 0 })} min="1" className="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 rounded-md text-sm font-bold text-center text-slate-800 focus:ring-1 focus:ring-tm-primary focus:border-tm-primary outline-none" />
@@ -518,7 +579,6 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                                                     <select value={item.unit} onChange={(e) => handleUpdateTypeConfig(item.id, item.tempCategoryId, item.tempTypeId, { classification: currentType.classification || 'asset', unit: e.target.value })} className="px-1 py-0.5 border border-slate-200 rounded text-slate-700 bg-white outline-none">{UNIT_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select>
                                                 </div>
                                           )}
-                                          {item.availableStock > 0 && (<div className="absolute top-2 right-10 text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100 flex items-center gap-1"><BsCheckCircleFill /> Stok: {item.availableStock}</div>)}
                                       </div>
                                   </div>
                               </div>

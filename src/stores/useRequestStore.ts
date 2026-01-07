@@ -84,12 +84,15 @@ export const useRequestStore = create<RequestState>((set, get) => ({
   },
 
   addRequest: async (requestData) => {
+      // 1. RE-FETCH ASSETS untuk memastikan data stok paling baru (Anti-Stale)
+      await useAssetStore.getState().fetchAssets(); 
+
       const current = get().requests;
       const requestDate = new Date(requestData.requestDate);
       const docsForGenerator = current.map(r => ({ docNumber: r.id }));
       const newId = generateDocumentNumber('RO', docsForGenerator, requestDate);
       
-      // LOGIKA CERDAS: Cek Stok Otomatis
+      // 2. LOGIKA CERDAS: Cek Stok Otomatis (Dengan Data Segar)
       const { checkAvailability } = useAssetStore.getState();
       const itemStatuses: Record<number, any> = {};
       let allStockAvailable = true;
@@ -103,7 +106,9 @@ export const useRequestStore = create<RequestState>((set, get) => ({
                itemStatuses[item.id] = { 
                    status: 'stock_allocated', 
                    approvedQuantity: item.quantity,
-                   reason: 'Stok tersedia di gudang (Auto-Allocated)' 
+                   reason: stockCheck.isFragmented 
+                        ? 'Stok tersedia di gudang (Fragmented/Terpecah)' 
+                        : 'Stok tersedia di gudang (Auto-Allocated)' 
                };
            } else {
                // Jika kurang, tandai butuh pengadaan
@@ -115,8 +120,7 @@ export const useRequestStore = create<RequestState>((set, get) => ({
            }
       });
       
-      // Jika SEMUA item tersedia, bypass approval dan langsung ke status Siap Handover
-      // Kecuali jika ini request Project Based / Urgent yang mungkin butuh review khusus
+      // 3. Tentukan Status Awal
       const initialStatus = (allStockAvailable && requestData.order.type === 'Regular Stock') 
           ? ItemStatus.AWAITING_HANDOVER 
           : ItemStatus.PENDING;
@@ -127,10 +131,11 @@ export const useRequestStore = create<RequestState>((set, get) => ({
         docNumber: newId,
         status: initialStatus,
         itemStatuses: itemStatuses,
-        // Jika auto-allocated, anggap sudah registered (karena barang sudah ada)
-        isRegistered: allStockAvailable && requestData.order.type === 'Regular Stock',
-        partiallyRegisteredItems: allStockAvailable ? 
-            requestData.items.reduce((acc, item) => ({...acc, [item.id]: item.quantity}), {}) : {}
+        // BUG FIX: Jangan set isRegistered=true otomatis untuk alokasi stok.
+        // Aset fisik belum dipilih (linking ID belum terjadi).
+        // Biarkan false, nanti proses Handover yang akan memilih aset fisik.
+        isRegistered: false, 
+        partiallyRegisteredItems: {}
       };
 
       const updated = [newRequest, ...current];
@@ -140,7 +145,6 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       // Notifikasi Cerdas
       if (initialStatus === ItemStatus.AWAITING_HANDOVER) {
            sendSystemNotif('Admin Logistik', 'REQUEST_CREATED', newRequest.id, 'membuat request (Stok Tersedia, Siap Handover)', true);
-           // Info balik ke user
            useNotificationStore.getState().addToast('Request dibuat. Stok tersedia, silakan hubungi Logistik untuk pengambilan.', 'success');
       } else {
            sendSystemNotif('Admin Logistik', 'REQUEST_CREATED', newRequest.id, 'membuat permintaan aset baru (Butuh Pengadaan/Review)', true);
@@ -186,9 +190,12 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     const requestIndex = currentRequests.findIndex(r => r.id === requestId);
     if (requestIndex === -1) return false;
 
+    // Security Check: Pastikan count tidak negatif
+    const validCount = Math.max(0, count);
+
     const request = currentRequests[requestIndex];
     const currentRegistered = request.partiallyRegisteredItems || {};
-    const newCount = (currentRegistered[itemId] || 0) + count;
+    const newCount = (currentRegistered[itemId] || 0) + validCount;
     const updatedRegistered = { ...currentRegistered, [itemId]: newCount };
 
     let isFullyComplete = true;

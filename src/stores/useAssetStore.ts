@@ -1,11 +1,12 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { Asset, AssetCategory, StockMovement, MovementType, AssetStatus, AssetCondition, ActivityLogEntry } from '../types';
+import { Asset, AssetCategory, StockMovement, MovementType, AssetStatus, ActivityLogEntry, ItemStatus } from '../types';
 import * as api from '../services/api';
 import { useNotificationStore } from './useNotificationStore';
 import { useMasterDataStore } from './useMasterDataStore';
 import { useAuthStore } from './useAuthStore';
+import { useRequestStore } from './useRequestStore'; // Cross-store access
 
 interface AssetState {
   assets: Asset[];
@@ -17,7 +18,7 @@ interface AssetState {
   fetchAssets: () => Promise<void>;
   addAsset: (asset: Asset | (Asset & { initialBalance?: number, currentBalance?: number })) => Promise<void>;
   updateAsset: (id: string, data: Partial<Asset>) => Promise<void>;
-  updateAssetBatch: (ids: string[], data: Partial<Asset>, logAction?: string) => Promise<void>; // Updated signature
+  updateAssetBatch: (ids: string[], data: Partial<Asset>, logAction?: string) => Promise<void>; 
   deleteAsset: (id: string) => Promise<void>;
   
   updateCategories: (categories: AssetCategory[]) => Promise<void>;
@@ -26,8 +27,19 @@ interface AssetState {
   recordMovement: (movement: Omit<StockMovement, 'id' | 'balanceAfter'>) => Promise<void>;
   getStockHistory: (name: string, brand: string) => StockMovement[];
   
-  // Advanced Logic
-  checkAvailability: (itemName: string, brand: string, qtyNeeded: number) => { available: number, isSufficient: boolean, recommendedSourceIds: string[] };
+  // Advanced Logic - Updated signature
+  checkAvailability: (itemName: string, brand: string, qtyNeeded: number, excludeRequestId?: string) => { 
+      physical: number, 
+      reserved: number, 
+      available: number, 
+      isSufficient: boolean, 
+      isFragmented: boolean, 
+      breakdown: { type: 'unit' | 'measurement', unit: string },
+      recommendedSourceIds: string[] 
+  };
+  
+  validateStockForRequest: (items: { itemName: string; itemTypeBrand: string; quantity: number }[], excludeRequestId?: string) => { valid: boolean; errors: string[] };
+
   consumeMaterials: (
       materials: { materialAssetId?: string, itemName: string, brand: string, quantity: number, unit: string }[],
       context: { customerId?: string, location?: string, docNumber?: string }
@@ -92,7 +104,6 @@ export const useAssetStore = create<AssetState>()(
       addAsset: async (rawAsset) => {
         const asset = sanitizeBulkAsset(rawAsset, get().categories) as Asset;
         
-        // Ensure balance is set for measurement items
         if ((rawAsset as any).initialBalance !== undefined) {
              asset.initialBalance = (rawAsset as any).initialBalance;
              asset.currentBalance = (rawAsset as any).currentBalance ?? (rawAsset as any).initialBalance;
@@ -129,16 +140,13 @@ export const useAssetStore = create<AssetState>()(
         await api.updateData('app_assets', updated);
         set({ assets: updated });
 
-        // INTELLIGENT TRACKING: Deteksi perubahan status penting
         if (originalAsset && data.status && data.status !== originalAsset.status) {
              let type: MovementType | null = null;
              
-             // 1. Keluar dari Gudang
              if (originalAsset.status === AssetStatus.IN_STORAGE && data.status !== AssetStatus.IN_STORAGE) {
                  if (data.status === AssetStatus.IN_USE) type = 'OUT_INSTALLATION';
                  else if (data.status === AssetStatus.DAMAGED) type = 'OUT_BROKEN';
              } 
-             // 2. Masuk ke Gudang (Return/Dismantle)
              else if (originalAsset.status !== AssetStatus.IN_STORAGE && data.status === AssetStatus.IN_STORAGE) {
                  type = 'IN_RETURN';
              }
@@ -156,7 +164,6 @@ export const useAssetStore = create<AssetState>()(
                  });
              }
              
-             // NOTIFIKASI CERDAS
              if (data.status === AssetStatus.DAMAGED) {
                  notifyAdmins('ASSET_DAMAGED_REPORT', id, `melaporkan kerusakan pada aset ${originalAsset.name}`);
              }
@@ -169,7 +176,6 @@ export const useAssetStore = create<AssetState>()(
           
           const updated = current.map(a => {
               if (ids.includes(a.id)) {
-                  // Create activity log for each item
                   const newLog: ActivityLogEntry = {
                       id: `log-batch-${Date.now()}-${Math.random()}`,
                       timestamp: new Date().toISOString(),
@@ -232,30 +238,96 @@ export const useAssetStore = create<AssetState>()(
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       },
       
-      checkAvailability: (itemName, brand, qtyNeeded) => {
+      // --- THE ULTIMATE AVAILABILITY LOGIC (REFACTORED) ---
+      checkAvailability: (itemName, brand, qtyNeeded, excludeRequestId) => {
           const assets = get().assets;
-          const availableAssets = assets.filter(a => 
+          // IMPORTANT: Fetch requests directly from store to ensure latest state
+          const requests = useRequestStore.getState().requests;
+          
+          // 1. Fisik: Apa yang benar-benar ada di gudang saat ini?
+          const physicalAssets = assets.filter(a => 
               a.name === itemName && 
               a.brand === brand && 
               a.status === AssetStatus.IN_STORAGE
           );
 
-          const isMeasurement = availableAssets.length > 0 && availableAssets[0].initialBalance !== undefined;
+          // 2. Deteksi Tipe (Measurement vs Unit)
+          const isMeasurement = physicalAssets.length > 0 && physicalAssets[0].initialBalance !== undefined;
+          
+          // 3. Reservasi: Apa yang sudah dijanjikan ke orang lain?
+          // Filter hanya request aktif yang memotong stok (stock_allocated)
+          // FIX: Exclude request yang sedang diedit/diperiksa (excludeRequestId) agar tidak menghitung reservasi diri sendiri
+          const activeRequests = requests.filter(r => 
+              r.id !== excludeRequestId &&
+              ![ItemStatus.COMPLETED, ItemStatus.REJECTED, ItemStatus.CANCELLED].includes(r.status)
+          );
 
+          let reservedQuantity = 0;
+          activeRequests.forEach(req => {
+              const matchingItems = req.items.filter(i => i.itemName === itemName && i.itemTypeBrand === brand);
+              matchingItems.forEach(item => {
+                  const status = req.itemStatuses?.[item.id];
+                  if (status?.status === 'stock_allocated') {
+                      reservedQuantity += (status.approvedQuantity ?? item.quantity);
+                  }
+              });
+          });
+
+          // 4. Kalkulasi Final ATP (Available to Promise)
           if (isMeasurement) {
-              const totalAvailableLength = availableAssets.reduce((sum, a) => sum + (a.currentBalance || 0), 0);
+              const totalPhysicalLength = physicalAssets.reduce((sum, a) => sum + (a.currentBalance || 0), 0);
+              const availableLength = Math.max(0, totalPhysicalLength - reservedQuantity);
+              
+              const hasSinglePieceSufficient = physicalAssets.some(a => (a.currentBalance || 0) >= qtyNeeded);
+              const isFragmented = !hasSinglePieceSufficient && availableLength >= qtyNeeded;
+
+              physicalAssets.sort((a, b) => new Date(a.registrationDate).getTime() - new Date(b.registrationDate).getTime());
+              const recommendedAssets = physicalAssets.filter(a => (a.currentBalance || 0) > 0);
+
               return {
-                  available: totalAvailableLength,
-                  isSufficient: totalAvailableLength >= qtyNeeded,
-                  recommendedSourceIds: availableAssets.map(a => a.id)
+                  physical: totalPhysicalLength,
+                  reserved: reservedQuantity,
+                  available: availableLength,
+                  isSufficient: availableLength >= qtyNeeded,
+                  isFragmented, 
+                  breakdown: { type: 'measurement', unit: 'Meter' },
+                  recommendedSourceIds: recommendedAssets.map(a => a.id)
               };
+
           } else {
+              const totalPhysicalCount = physicalAssets.length;
+              const availableCount = Math.max(0, totalPhysicalCount - reservedQuantity);
+
+              physicalAssets.sort((a, b) => new Date(a.registrationDate).getTime() - new Date(b.registrationDate).getTime());
+              
+              // Rekomendasi ID: Skip sejumlah yang sudah di-reserve (FIFO)
+              const recommendedAssets = physicalAssets.slice(reservedQuantity, reservedQuantity + qtyNeeded);
+
               return {
-                  available: availableAssets.length,
-                  isSufficient: availableAssets.length >= qtyNeeded,
-                  recommendedSourceIds: availableAssets.slice(0, qtyNeeded).map(a => a.id)
+                  physical: totalPhysicalCount,
+                  reserved: reservedQuantity,
+                  available: availableCount,
+                  isSufficient: availableCount >= qtyNeeded,
+                  isFragmented: false,
+                  breakdown: { type: 'unit', unit: 'Unit' },
+                  recommendedSourceIds: recommendedAssets.map(a => a.id)
               };
           }
+      },
+
+      // --- GATEKEEPER: VALIDASI MASAL ---
+      validateStockForRequest: (items, excludeRequestId) => {
+          const errors: string[] = [];
+          const self = get(); // Get fresh state
+
+          items.forEach(item => {
+              const check = self.checkAvailability(item.itemName, item.itemTypeBrand, item.quantity, excludeRequestId);
+              if (!check.isSufficient) {
+                  errors.push(`${item.itemName}: Stok tidak cukup (Butuh: ${item.quantity}, Ada: ${check.available})`);
+              }
+          });
+          
+          return { valid: errors.length === 0, errors };
       },
 
       consumeMaterials: async (materials, context) => {

@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { InfoIcon } from '../../../components/icons/InfoIcon';
 import { DollarIcon } from '../../../components/icons/DollarIcon';
 import { WrenchIcon } from '../../../components/icons/WrenchIcon';
@@ -11,7 +11,7 @@ import { QrCodeIcon } from '../../../components/icons/QrCodeIcon';
 import { TrashIcon } from '../../../components/icons/TrashIcon';
 import { ExclamationTriangleIcon } from '../../../components/icons/ExclamationTriangleIcon';
 import { PaperclipIcon } from '../../../components/icons/PaperclipIcon';
-import { BsRulers } from 'react-icons/bs';
+import { BsRulers, BsLightningFill, BsPlusLg, BsCalculator, BsArrowRight } from 'react-icons/bs';
 
 interface SectionProps {
     formData: RegistrationFormData;
@@ -152,7 +152,7 @@ export const FinancialSection: React.FC<FinancialSectionProps> = ({
 
     return (
         <FormSection title="Informasi Pembelian" icon={<DollarIcon className="w-6 h-6 mr-3 text-tm-primary" />}>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:col-span-2">
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:col-span-2">
                 <div>
                     <label className="block text-sm font-medium text-gray-700">Harga Satuan (Rp)</label>
                     <input 
@@ -193,14 +193,18 @@ interface TrackingSectionProps extends SectionProps {
     isEditing: boolean;
     addBulkItem: () => void;
     removeBulkItem: (id: string | number) => void;
-    updateBulkItem: (id: string | number, field: 'serialNumber' | 'macAddress', value: string) => void;
+    updateBulkItem: (id: string | number, field: string, value: any) => void;
     onStartScan: (id: string | number) => void;
-    // New Prop to check model details
     selectedModel?: StandardItem;
+    // New Props for Generator
+    generateMeasurementItems?: (qty: number, lengthPerUnit: number) => void;
+    currentStockCount?: number;
 }
 
 export const TrackingSection: React.FC<TrackingSectionProps> = ({ 
-    formData, updateField, selectedType, selectedModel, isEditing, addBulkItem, removeBulkItem, updateBulkItem, onStartScan 
+    formData, updateField, selectedType, selectedModel, isEditing, 
+    addBulkItem, removeBulkItem, updateBulkItem, onStartScan,
+    generateMeasurementItems, currentStockCount
 }) => {
     // Determine labels and modes based on Model if available, else Type
     const isBulkMode = selectedType?.trackingMethod === 'bulk' && !isEditing;
@@ -208,8 +212,22 @@ export const TrackingSection: React.FC<TrackingSectionProps> = ({
     const unitLabel = modelUnit;
     
     // Check if bulk type is measurement (e.g. Cable)
-    // Priority: Model config > Type config (fallback)
     const isMeasurementType = isBulkMode && (selectedModel?.bulkType === 'measurement');
+    const baseUnit = selectedModel?.baseUnitOfMeasure || 'Satuan';
+
+    // Local state for batch generation
+    const [genQty, setGenQty] = useState<number>(1);
+    const [genLength, setGenLength] = useState<number>(selectedModel?.quantityPerUnit || 1000);
+    
+    // Auto update genLength when model changes
+    useEffect(() => {
+        if (selectedModel?.quantityPerUnit) {
+            setGenLength(selectedModel.quantityPerUnit);
+        }
+    }, [selectedModel]);
+
+    // Calculate Total Length for Measurement
+    const totalMeasurementLength = formData.bulkItems.reduce((acc, item) => acc + (item.initialBalance || 0), 0);
 
     return (
         <FormSection title="Detail Unit Aset" icon={<InfoIcon className="w-6 h-6 mr-3 text-tm-primary" />} className="md:col-span-2">
@@ -250,48 +268,150 @@ export const TrackingSection: React.FC<TrackingSectionProps> = ({
                 <>
                     {/* Logic untuk Tipe MEASUREMENT (Kabel, dll) */}
                     {isMeasurementType ? (
-                        <>
-                            <div className="md:col-span-2 p-4 -mt-2 mb-2 border-l-4 rounded-r-lg bg-indigo-50 border-indigo-400">
+                        <div className="md:col-span-2 space-y-6">
+                            <div className="p-4 border-l-4 rounded-r-lg bg-indigo-50 border-indigo-400">
                                 <div className="flex items-start gap-3">
                                     <BsRulers className="flex-shrink-0 w-5 h-5 mt-1 text-indigo-600" />
                                     <div className="text-sm text-indigo-800">
                                         <p className="font-semibold">Mode Pencatatan Terukur (Measurement)</p>
-                                        <p>Setiap item yang dicatat akan memiliki ID unik dan saldo stok yang dapat dikurangi secara bertahap.</p>
+                                        <p>Aset akan dicatat sebagai unit fisik (Contoh: Drum/Roll) dengan saldo isi (Contoh: Meter) yang dapat berkurang saat digunakan.</p>
                                     </div>
                                 </div>
                             </div>
-                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:col-span-2">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Jumlah Fisik ({unitLabel})</label>
-                                    <div className="relative mt-1">
-                                        <input type="number" value={formData.quantity} onChange={(e) => updateField('quantity', e.target.value === '' ? '' : parseInt(e.target.value, 10))} min="1" required className="block w-full py-2 text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm sm:text-sm" placeholder="Contoh: 5 Hasbal" />
-                                    </div>
-                                    <p className="mt-1 text-xs text-gray-500">Jumlah kontainer/unit fisik yang diterima.</p>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">Isi per {unitLabel} ({selectedModel?.baseUnitOfMeasure || 'Satuan'})</label>
-                                    <div className="relative mt-1">
+
+                            {/* Batch Generator */}
+                            <div className="bg-gray-100 p-4 rounded-xl border border-gray-200">
+                                <h4 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                                    <BsCalculator className="w-4 h-4"/> Generator Batch
+                                </h4>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">Jumlah Fisik ({unitLabel})</label>
                                         <input 
                                             type="number" 
-                                            value={selectedModel?.quantityPerUnit || ''} 
-                                            readOnly 
-                                            className="block w-full py-2 text-gray-700 bg-gray-100 border border-gray-200 rounded-md shadow-sm sm:text-sm cursor-not-allowed font-bold" 
+                                            min="1" 
+                                            value={genQty} 
+                                            onChange={(e) => setGenQty(Math.max(1, parseInt(e.target.value) || 0))}
+                                            className="block w-full px-3 py-2 text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm sm:text-sm" 
                                         />
                                     </div>
-                                    <p className="mt-1 text-xs text-gray-500">Konfigurasi otomatis dari Model (Master Data).</p>
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">Isi per {unitLabel} ({baseUnit})</label>
+                                        <input 
+                                            type="number" 
+                                            min="1" 
+                                            value={genLength} 
+                                            onChange={(e) => setGenLength(Math.max(1, parseInt(e.target.value) || 0))}
+                                            className="block w-full px-3 py-2 text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm sm:text-sm" 
+                                        />
+                                    </div>
+                                    <button 
+                                        type="button" 
+                                        onClick={() => generateMeasurementItems && generateMeasurementItems(genQty, genLength)}
+                                        className="w-full px-4 py-2 bg-indigo-600 text-white text-sm font-bold rounded-md hover:bg-indigo-700 shadow-sm transition-colors"
+                                    >
+                                        Generate Rincian
+                                    </button>
                                 </div>
                             </div>
-                        </>
+
+                            {/* Detailed List */}
+                            <div className="space-y-3">
+                                {formData.bulkItems.map((item, index) => (
+                                    <div key={item.id} className="relative grid grid-cols-12 gap-3 p-3 bg-white border border-gray-200 rounded-lg items-end">
+                                        <div className="col-span-12 sm:col-span-1 flex items-center justify-center h-full pb-2">
+                                            <span className="font-bold text-gray-400">#{index + 1}</span>
+                                        </div>
+                                        <div className="col-span-12 sm:col-span-5">
+                                            <label className="block text-xs font-medium text-gray-500 mb-0.5">Kode / Batch ID (Serial Number)</label>
+                                            <div className="flex gap-2">
+                                                <input 
+                                                    type="text" 
+                                                    value={item.serialNumber} 
+                                                    onChange={(e) => updateBulkItem(item.id, 'serialNumber', e.target.value)} 
+                                                    placeholder="Auto / Scan" 
+                                                    className="block w-full px-3 py-1.5 text-sm border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500" 
+                                                />
+                                                <button type="button" onClick={() => onStartScan(item.id)} className="p-1.5 text-gray-500 bg-gray-100 rounded hover:text-tm-primary border border-gray-300"><QrCodeIcon className="w-4 h-4"/></button>
+                                            </div>
+                                        </div>
+                                        <div className="col-span-12 sm:col-span-5">
+                                            <label className="block text-xs font-medium text-gray-500 mb-0.5">Isi Awal ({baseUnit})</label>
+                                            <input 
+                                                type="number" 
+                                                value={item.initialBalance} 
+                                                onChange={(e) => updateBulkItem(item.id, 'initialBalance', e.target.value)} 
+                                                className="block w-full px-3 py-1.5 text-sm border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 text-right font-mono" 
+                                            />
+                                        </div>
+                                        <div className="col-span-12 sm:col-span-1 flex justify-center">
+                                             <button type="button" onClick={() => removeBulkItem(item.id)} className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"><TrashIcon className="w-4 h-4"/></button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            
+                            {/* Grand Total */}
+                            {formData.bulkItems.length > 0 && (
+                                <div className="flex justify-between items-center p-4 bg-indigo-50 border border-indigo-100 rounded-lg">
+                                    <span className="text-sm font-medium text-indigo-800">Total Aset Tercatat:</span>
+                                    <div className="text-right">
+                                        <span className="block text-lg font-bold text-indigo-900">{formData.bulkItems.length} {unitLabel}</span>
+                                        <span className="block text-xs text-indigo-600 font-medium">Total Isi: {totalMeasurementLength.toLocaleString('id-ID')} {baseUnit}</span>
+                                    </div>
+                                </div>
+                            )}
+
+                             <div className="flex justify-end">
+                                <button type="button" onClick={() => addBulkItem()} className="text-xs flex items-center gap-1 font-semibold text-indigo-600 hover:text-indigo-800">
+                                    <BsPlusLg /> Tambah Baris Manual
+                                </button>
+                            </div>
+                        </div>
                     ) : (
-                        /* Logic untuk Tipe COUNT (Konektor, dll) - Existing Logic */
-                        <>
-                             <div className="md:col-span-2 p-4 -mt-2 mb-2 border-l-4 rounded-r-lg bg-info-light border-tm-primary">
-                                <div className="flex items-start gap-3"><InfoIcon className="flex-shrink-0 w-5 h-5 mt-1 text-info-text" /><div className="text-sm text-info-text"><p className="font-semibold">Mode Pencatatan Massal (Direct Count)</p><p>Sistem akan menambahkan {formData.quantity || 0} unit ke stok pool item ini.</p></div></div>
+                        /* Logic untuk Tipe COUNT (Konektor, dll) */
+                        <div className="md:col-span-2 space-y-6">
+                             <div className="p-4 -mt-2 border-l-4 rounded-r-lg bg-info-light border-tm-primary">
+                                <div className="flex items-start gap-3">
+                                    <BsLightningFill className="flex-shrink-0 w-5 h-5 mt-1 text-info-text" />
+                                    <div className="text-sm text-info-text">
+                                        <p className="font-semibold">Mode Pencatatan Massal (Direct Count)</p>
+                                        <p>Item ini tidak dilacak per unit unik (SN). Sistem hanya akan menambahkan jumlah stok ke total inventory.</p>
+                                    </div>
+                                </div>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:col-span-2">
-                                <div><label className="block text-sm font-medium text-gray-700">Stok Masuk ({unitLabel})</label><div className="relative mt-1"><input type="number" value={formData.quantity} onChange={(e) => updateField('quantity', e.target.value === '' ? '' : parseInt(e.target.value, 10))} min="1" required className="block w-full py-2 text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm sm:text-sm" /></div></div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-2">Jumlah Penambahan Stok ({unitLabel})</label>
+                                    <div className="relative">
+                                        <input 
+                                            type="number" 
+                                            value={formData.quantity} 
+                                            onChange={(e) => updateField('quantity', e.target.value === '' ? '' : parseInt(e.target.value, 10))} 
+                                            min="1" 
+                                            required 
+                                            className="block w-full py-3 px-4 text-xl font-bold text-tm-primary bg-gray-50 border border-gray-300 rounded-lg shadow-inner focus:ring-tm-primary focus:border-tm-primary" 
+                                        />
+                                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400 pointer-events-none">{unitLabel}</span>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-4 text-sm text-gray-600 bg-gray-50 p-4 rounded-lg">
+                                    <div>
+                                        <span className="block text-xs uppercase font-bold text-gray-400">Stok Saat Ini</span>
+                                        <span className="text-lg font-bold text-gray-800">{currentStockCount || 0}</span>
+                                    </div>
+                                    <BsArrowRight className="text-gray-400 w-5 h-5" />
+                                    <div>
+                                        <span className="block text-xs uppercase font-bold text-gray-400">Estimasi Total</span>
+                                        <span className="text-lg font-bold text-success-text">
+                                            {(currentStockCount || 0) + (Number(formData.quantity) || 0)}
+                                        </span>
+                                    </div>
+                                </div>
                             </div>
-                        </>
+                        </div>
                     )}
                 </>
             )}

@@ -1,4 +1,6 @@
+
 import { Asset, AssetCategory, AssetStatus } from '../../../../types';
+import { useAssetStore } from '../../../../stores/useAssetStore'; // Import Store untuk logika ATP
 
 // Tipe data untuk state item di dalam form
 export interface RequestItemFormState {
@@ -11,6 +13,12 @@ export interface RequestItemFormState {
   tempTypeId: string;
   availableStock: number;
   unit: string;
+  // New: Detail stok untuk tooltip cerdas
+  stockDetails?: {
+      physical: number;
+      reserved: number;
+      isFragmented: boolean;
+  };
 }
 
 // Target stok default jika ambang batas custom tidak diatur.
@@ -26,6 +34,8 @@ export const prepareInitialItems = (
   categories: AssetCategory[]
 ): RequestItemFormState[] | undefined => {
   if (!rawItems || rawItems.length === 0) return undefined;
+
+  const { checkAvailability } = useAssetStore.getState(); // Akses logika ATP langsung
 
   return rawItems.map((item, idx) => {
     // 1. Cari Kategori dan Tipe berdasarkan Nama Item
@@ -43,14 +53,10 @@ export const prepareInitialItems = (
       )
     );
 
-    // 2. Hitung Stok Tersedia
-    const stockCount = item.currentStock !== undefined 
-      ? item.currentStock 
-      : assets.filter(a => 
-          a.name === item.name && 
-          a.brand === item.brand && 
-          a.status === AssetStatus.IN_STORAGE
-        ).length;
+    // 2. Hitung Stok Tersedia Menggunakan ATP Logic (Store)
+    // Asumsi awal qty = 1 untuk pengecekan fragmentasi
+    const stockInfo = checkAvailability(item.name, item.brand, 1);
+    const stockCount = stockInfo.available;
         
     // 3. LOGIKA BARU: Gunakan ambang batas yang dikirim, atau fallback ke default
     const targetStock = item.threshold ?? DEFAULT_RESTOCK_TARGET;
@@ -71,7 +77,12 @@ export const prepareInitialItems = (
       tempCategoryId: category?.id.toString() || '',
       tempTypeId: type?.id.toString() || '',
       availableStock: stockCount,
-      unit: type?.unitOfMeasure || 'Unit'
+      unit: type?.unitOfMeasure || 'Unit',
+      stockDetails: {
+          physical: stockInfo.physical,
+          reserved: stockInfo.reserved,
+          isFragmented: stockInfo.isFragmented
+      }
     };
   });
 };

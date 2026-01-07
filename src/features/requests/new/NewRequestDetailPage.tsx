@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Request, ItemStatus, User, Asset, AssetCategory, PurchaseDetails, Activity, Division } from '../../../types';
 import { DetailPageLayout } from '../../../components/layout/DetailPageLayout';
@@ -17,7 +18,7 @@ import { hasPermission } from '../../../utils/permissions';
 import { useRequestStore } from '../../../stores/useRequestStore';
 import { useNotification } from '../../../providers/NotificationProvider';
 import { RequestStatusSidebar } from './components/RequestStatusSidebar';
-import { BsPerson, BsBuilding, BsCalendarEvent, BsHash, BsFileEarmarkText, BsCheckCircleFill } from 'react-icons/bs';
+import { BsPerson, BsBuilding, BsCalendarEvent, BsHash, BsFileEarmarkText, BsCheckCircleFill, BsRulers, BsBoxSeam, BsLightningFill, Bs123 } from 'react-icons/bs';
 import { ClickableLink } from '../../../components/ui/ClickableLink';
 import { PencilIcon } from '../../../components/icons/PencilIcon';
 import { ArchiveBoxIcon } from '../../../components/icons/ArchiveBoxIcon';
@@ -389,10 +390,9 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                     onFinalSubmit={handleFinalSubmitForApproval}
                     isPurchaseFormValid={isPurchaseFormValid}
                     onOpenCancellationModal={() => setIsCancelModalOpen(true)}
-                    // REFACTOR: Use Smart Handler here instead of raw onOpenStaging
                     onOpenStaging={handleStagingAction} 
-                    // REFACTOR: Pass calculated state to sidebar for UI logic
                     isStagingComplete={isStagingComplete}
+                    onShowPreview={onShowPreview}
                 />
             }
         >
@@ -411,7 +411,6 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                         </div>
                     )}
                     
-                    {/* NEW: Staging Complete Notification */}
                     {isStagingComplete && request.status === ItemStatus.ARRIVED && (
                         <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 shadow-sm animate-fade-in-down no-print">
                             <div className="flex items-start gap-3">
@@ -470,10 +469,8 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                 <thead className="bg-slate-50 text-[10px] uppercase font-extrabold text-slate-500 border-b border-slate-200 tracking-wider">
                                     <tr>
                                         <th className="p-4 w-14 text-center">No.</th>
-                                        <th className="p-4">Kategori</th>
-                                        <th className="p-4">Tipe</th>
-                                        <th className="p-4">Nama Barang</th>
-                                        <th className="p-4">Brand</th>
+                                        <th className="p-4">Kategori & Tipe</th>
+                                        <th className="p-4">Nama Barang & Brand</th>
                                         <th className="p-4 text-center w-32">Jumlah</th>
                                         <th className="p-4">Keterangan</th>
                                     </tr>
@@ -488,24 +485,19 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                         const isPartiallyApproved = isAdjusted && approvedQuantity! > 0 && approvedQuantity! < item.quantity;
                                         const isStockAllocated = itemStatus?.status === 'stock_allocated';
                                         
-                                        // 1. Resolve Category & Type logic
+                                        // 1. Resolve Category, Type & Model for Config
                                         let categoryName = '-';
                                         let typeName = '-';
+                                        let displayUnit = item.unit || 'Unit'; 
+                                        let isMeasurement = false;
+                                        let isMaterial = false;
 
-                                        // Strategy A: Lookup by ID (Strong Link)
-                                        if (item.categoryId) {
-                                            const cat = assetCategories.find(c => c.id.toString() === item.categoryId?.toString());
-                                            if (cat) {
-                                                categoryName = cat.name;
-                                                if (item.typeId) {
-                                                    const typ = cat.types.find(t => t.id.toString() === item.typeId?.toString());
-                                                    if (typ) typeName = typ.name;
-                                                }
-                                            }
-                                        }
-
-                                        // Strategy B: Fallback Lookup by Name (Legacy Support)
-                                        if (categoryName === '-' || typeName === '-') {
+                                        // Lookup Logic: Robust search
+                                        let category = assetCategories.find(c => c.id.toString() === item.categoryId?.toString());
+                                        let type = category?.types.find(t => t.id.toString() === item.typeId?.toString());
+                                        
+                                        // Fallback Lookup by Name if IDs missing
+                                        if (!category || !type) {
                                             for (const cat of assetCategories) {
                                                 for (const typ of cat.types) {
                                                     const modelMatch = typ.standardItems?.some(
@@ -513,20 +505,43 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                                              (m.brand === item.itemTypeBrand || item.itemTypeBrand === 'Generic')
                                                     );
                                                     if (modelMatch) {
-                                                        if (categoryName === '-') categoryName = cat.name;
-                                                        if (typeName === '-') typeName = typ.name;
+                                                        if (!category) category = cat;
+                                                        if (!type) type = typ;
                                                         break;
                                                     }
                                                 }
-                                                if (categoryName !== '-' && typeName !== '-') break;
+                                                if (category && type) break;
                                             }
+                                        }
+
+                                        if (category) categoryName = category.name;
+                                        if (type) {
+                                            typeName = type.name;
+                                            isMaterial = type.classification === 'material' || type.trackingMethod === 'bulk';
+                                            
+                                            // Determine Unit & Measurement Flag
+                                            const model = type.standardItems?.find(m => m.name === item.itemName && m.brand === item.itemTypeBrand);
+                                            if (model && model.bulkType === 'measurement') {
+                                                isMeasurement = true;
+                                                // If User didn't specify unit (legacy data), use base
+                                                if (!item.unit || item.unit === 'Unit') {
+                                                    displayUnit = model.baseUnitOfMeasure || 'Meter';
+                                                }
+                                            } else {
+                                                if (!item.unit || item.unit === 'Unit') {
+                                                    displayUnit = type.unitOfMeasure || 'Unit';
+                                                }
+                                            }
+                                        }
+
+                                        // Ensure display unit uses user's selected unit if available and valid
+                                        if (item.unit && item.unit !== 'Unit') {
+                                            displayUnit = item.unit;
                                         }
 
                                         // Cek progress registrasi per item
                                         const registeredCount = request.partiallyRegisteredItems?.[item.id] || 0;
                                         const targetQty = approvedQuantity ?? item.quantity;
-                                        
-                                        // FIX: Remove status check. Badge stays if items are fully registered.
                                         const isItemFullyRegistered = !isRejected && !isStockAllocated && registeredCount >= targetQty;
 
                                         let rowClass = 'hover:bg-slate-50/50 transition-colors';
@@ -537,14 +552,36 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                         return (
                                             <tr key={item.id} className={rowClass}>
                                                 <td className="p-4 text-center font-normal text-slate-400">{index + 1}</td>
-                                                <td className="p-4 text-slate-600 font-normal text-xs">{categoryName}</td>
-                                                <td className="p-4 text-slate-600 font-normal text-xs">{typeName}</td>
+                                                <td className="p-4">
+                                                    <div className="flex flex-col gap-0.5">
+                                                        <span className="text-slate-700 font-bold text-xs">{categoryName}</span>
+                                                        <span className="text-slate-500 font-normal text-xs">{typeName}</span>
+                                                        {/* Type Badge */}
+                                                        <div className="mt-1">
+                                                            {isMeasurement ? (
+                                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] bg-indigo-50 text-indigo-700 border border-indigo-100 font-bold uppercase tracking-wider">
+                                                                    <BsRulers className="w-2.5 h-2.5"/> Terukur
+                                                                </span>
+                                                            ) : isMaterial ? (
+                                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] bg-orange-50 text-orange-700 border border-orange-100 font-bold uppercase tracking-wider">
+                                                                    <BsLightningFill className="w-2.5 h-2.5"/> Material
+                                                                </span>
+                                                            ) : (
+                                                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] bg-blue-50 text-blue-700 border border-blue-100 font-bold uppercase tracking-wider">
+                                                                    <BsBoxSeam className="w-2.5 h-2.5"/> Aset
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </td>
                                                 <td className="p-4 font-semibold">
                                                     <div className="flex flex-col gap-1">
-                                                        <span className={isRejected ? 'line-through decoration-red-300' : 'text-slate-800 text-base font-normal'}>
+                                                        <span className={isRejected ? 'line-through decoration-red-300' : 'text-slate-800 text-sm font-bold'}>
                                                             {item.itemName}
                                                         </span>
-                                                        <div className="flex gap-2 flex-wrap">
+                                                        <span className={`text-xs ${isRejected ? 'text-slate-400' : 'text-slate-500 font-medium'}`}>{item.itemTypeBrand}</span>
+                                                        
+                                                        <div className="flex gap-2 flex-wrap mt-1">
                                                             {isPartiallyApproved && <span className="px-2 py-0.5 text-[9px] font-bold text-white bg-amber-500 rounded uppercase tracking-wider shadow-sm">Revisi</span>}
                                                             {isRejected && <span className="px-2 py-0.5 text-[9px] font-bold text-white bg-red-500 rounded uppercase tracking-wider shadow-sm">Ditolak</span>}
                                                             {isStockAllocated && <span className="px-2 py-0.5 text-[9px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-200 rounded uppercase tracking-wider shadow-sm">Stok</span>}
@@ -552,7 +589,6 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                                         </div>
                                                     </div>
                                                 </td>
-                                                <td className={`p-4 ${isRejected ? 'text-slate-400' : 'text-slate-600 font-normal'}`}>{item.itemTypeBrand}</td>
                                                 <td className="p-4 text-center align-top">
                                                     <div className="flex flex-col items-center">
                                                         {isAdjusted ? (
@@ -560,7 +596,7 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                                         ) : (
                                                             <strong className="text-lg font-bold text-slate-800">{item.quantity}</strong>
                                                         )}
-                                                        <span className="text-[9px] uppercase font-bold text-slate-400 mt-0.5 tracking-wide">Unit</span>
+                                                        <span className="text-[9px] uppercase font-bold text-slate-500 mt-0.5 tracking-wide bg-slate-100 px-1.5 rounded">{displayUnit}</span>
                                                     </div>
                                                 </td>
                                                 <td className={`p-4 text-sm ${isRejected ? 'text-slate-400' : 'text-slate-600'}`}>
