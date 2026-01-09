@@ -92,14 +92,14 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       const docsForGenerator = current.map(r => ({ docNumber: r.id }));
       const newId = generateDocumentNumber('RO', docsForGenerator, requestDate);
       
-      // 2. LOGIKA CERDAS: Cek Stok Otomatis (Dengan Data Segar)
+      // 2. LOGIKA CERDAS: Cek Stok Otomatis (Dengan Data Segar & Unit Context)
       const { checkAvailability } = useAssetStore.getState();
       const itemStatuses: Record<number, any> = {};
       let allStockAvailable = true;
 
       requestData.items.forEach(item => {
-           // Cek ketersediaan di Asset Store
-           const stockCheck = checkAvailability(item.itemName, item.itemTypeBrand, item.quantity);
+           // CRITICAL FIX: Pass 'item.unit' agar checkAvailability tahu apakah ini request Meter atau Drum
+           const stockCheck = checkAvailability(item.itemName, item.itemTypeBrand, item.quantity, item.unit);
            
            if (stockCheck.isSufficient) {
                // Jika stok ada, langsung alokasikan secara sistem
@@ -131,9 +131,6 @@ export const useRequestStore = create<RequestState>((set, get) => ({
         docNumber: newId,
         status: initialStatus,
         itemStatuses: itemStatuses,
-        // BUG FIX: Jangan set isRegistered=true otomatis untuk alokasi stok.
-        // Aset fisik belum dipilih (linking ID belum terjadi).
-        // Biarkan false, nanti proses Handover yang akan memilih aset fisik.
         isRegistered: false, 
         partiallyRegisteredItems: {}
       };

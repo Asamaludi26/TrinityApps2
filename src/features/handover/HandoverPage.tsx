@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Handover, ItemStatus, Asset, User, PreviewData, Request, LoanRequest, LoanRequestStatus, AssetStatus } from '../../types';
+import { Handover, ItemStatus, Asset, User, PreviewData, Request, LoanRequest, LoanRequestStatus, AssetStatus, StockMovement, ActivityLogEntry } from '../../types';
 import { useNotification } from '../../providers/NotificationProvider';
 import { useSortableData } from '../../hooks/useSortableData';
 import { exportToCSV } from '../../utils/csvExporter';
@@ -21,16 +21,24 @@ import { useMasterDataStore } from '../../stores/useMasterDataStore';
 import { useAuthStore } from '../../stores/useAuthStore';
 import { useRequestStore } from '../../stores/useRequestStore';
 
+// Utils
+import { generateUUID } from '../../utils/uuid';
+
 interface ItemHandoverPageProps {
-    currentUser?: User; // Keeping optional to allow parent override if needed, but store is primary
+    currentUser?: User; 
     prefillData?: Asset | Request | LoanRequest | null;
     onClearPrefill: () => void;
     onShowPreview: (data: PreviewData) => void;
     initialFilters?: any;
     onClearInitialFilters: () => void;
-    // Legacy props for compatibility
+    // Legacy props
     handovers?: any; setHandovers?: any; assets?: any; users?: any; divisions?: any;
 }
+
+// Utility: Safe rounding to prevent float errors
+const safeRound = (num: number): number => {
+    return Math.round((num + Number.EPSILON) * 10000) / 10000;
+};
 
 const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
     const { prefillData, onClearPrefill, onShowPreview, initialFilters, onClearInitialFilters } = props;
@@ -40,8 +48,9 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
     const addHandover = useTransactionStore(state => state.addHandover);
     const deleteHandover = useTransactionStore(state => state.deleteHandover);
     
-    const updateAssetBatch = useAssetStore(state => state.updateAssetBatch);
-    // Kita tidak mengambil assets dari hook state langsung untuk logic save, tapi via getState() nanti
+    // Asset Actions & Data
+    const { updateAssetBatch, updateAsset, addAsset, recordMovement, categories } = useAssetStore();
+
     const users = useMasterDataStore(state => state.users);
     const divisions = useMasterDataStore(state => state.divisions);
     const storeUser = useAuthStore(state => state.currentUser);
@@ -64,12 +73,10 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
     const [isBulkSelectMode, setIsBulkSelectMode] = useState(false);
     const [selectedHandoverIds, setSelectedHandoverIds] = useState<string[]>([]);
     
-    // Modals & Async State
+    // Modals
     const [handoverToDeleteId, setHandoverToDeleteId] = useState<string | null>(null);
     const [bulkDeleteConfirmation, setBulkDeleteConfirmation] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
-    
-    // Export Modal State
     const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
     const addNotification = useNotification();
@@ -86,7 +93,7 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
         }
     }, [initialFilters, onClearInitialFilters]);
 
-    // Data Processing for List
+    // Data Processing
     const filteredHandovers = useMemo(() => {
         let tempHandovers = handovers;
         if (currentUser.role === 'Staff') {
@@ -106,7 +113,7 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
 
     const { items: sortedHandovers, requestSort, sortConfig } = useSortableData<Handover>(filteredHandovers, { key: 'handoverDate', direction: 'descending' });
 
-    // Action Handlers
+    // --- SMART LOGIC: HANDLE SAVE & ASSET SPLITTING ---
     const handleSave = async (data: Omit<Handover, 'id' | 'status'>, targetStatus: AssetStatus) => {
         setIsLoading(true);
         const newHandover: Handover = {
@@ -116,34 +123,122 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
         };
         
         try {
-            // 1. Create Handover Document
+            // 1. Simpan Dokumen Handover
             await addHandover(newHandover);
 
-            // 2. Update Assets Status & Location (BATCH UPDATE)
-            const assetIdsInHandover = data.items
-                .map(item => item.assetId)
-                .filter((id): id is string => !!id);
+            // 2. INTELLIGENT ASSET UPDATE
+            const freshAssets = useAssetStore.getState().assets;
+            const assetsToMoveIds: string[] = [];
 
-            if (assetIdsInHandover.length > 0) {
-                // LOGIC UPDATE: Mendukung IN_CUSTODY atau IN_USE
+            for (const item of data.items) {
+                if (!item.assetId) continue;
+
+                const parentAsset = freshAssets.find(a => a.id === item.assetId);
+                if (!parentAsset) continue;
+
+                const isMeasurement = parentAsset.initialBalance !== undefined && parentAsset.currentBalance !== undefined;
+                
+                if (isMeasurement) {
+                    let containerUnit = 'Hasbal'; 
+                    let baseUnit = 'Meter';      
+
+                    const catConfig = categories.find(c => c.name === parentAsset.category);
+                    const typeConfig = catConfig?.types.find(t => t.name === parentAsset.type);
+                    const modelConfig = typeConfig?.standardItems?.find(m => m.name === parentAsset.name && m.brand === parentAsset.brand);
+
+                    if (modelConfig && modelConfig.bulkType === 'measurement') {
+                        containerUnit = modelConfig.unitOfMeasure || containerUnit;
+                        baseUnit = modelConfig.baseUnitOfMeasure || baseUnit;
+                    }
+
+                    const requestedUnit = item.unit || containerUnit;
+                    const isWholeMove = requestedUnit === containerUnit;
+                    
+                    // KASUS A: Pengambilan Eceran / Potongan (Base Unit)
+                    if (!isWholeMove) {
+                        const qtyTaken = item.quantity;
+                        const currentBalance = parentAsset.currentBalance || 0;
+                        
+                        const newBalance = Math.max(0, safeRound(currentBalance - qtyTaken));
+                        
+                        // A. Kurangi stok induk di Gudang
+                        await updateAsset(parentAsset.id, {
+                            currentBalance: newBalance,
+                        });
+
+                        // B. Buat "Child Asset" (Potongan) untuk Penerima
+                        const childAssetId = `${parentAsset.id}-PART-${Date.now().toString().slice(-4)}`;
+                        
+                        const childAsset: Asset = {
+                            ...parentAsset,
+                            id: childAssetId,
+                            serialNumber: undefined, 
+                            macAddress: undefined,
+                            
+                            name: `${parentAsset.name} (Potongan)`,
+                            initialBalance: qtyTaken, // Kapasitas potongan ini
+                            currentBalance: qtyTaken, // Masih utuh saat diterima
+                            
+                            status: targetStatus, // IN_CUSTODY / IN_USE
+                            currentUser: data.penerima,
+                            location: `Dipegang: ${data.penerima}`,
+                            locationDetail: 'Pecahan dari handover',
+                            
+                            registrationDate: new Date().toISOString(),
+                            recordedBy: currentUser.name,
+                            activityLog: [{
+                                id: generateUUID(),
+                                timestamp: new Date().toISOString(),
+                                user: currentUser.name,
+                                action: 'Aset Pecahan (Handover)',
+                                details: `Diterima ${qtyTaken} ${requestedUnit} dari induk ${parentAsset.id}. Ref: ${newHandover.docNumber}`
+                            }]
+                        };
+
+                        await addAsset(childAsset);
+
+                        // C. Catat Log Pergerakan (Induk berkurang)
+                        await recordMovement({
+                            assetName: parentAsset.name,
+                            brand: parentAsset.brand,
+                            date: new Date().toISOString(),
+                            type: 'OUT_HANDOVER', 
+                            quantity: qtyTaken,
+                            referenceId: newHandover.docNumber,
+                            actor: currentUser.name,
+                            notes: `Handover parsial ke ${data.penerima}. Sisa induk: ${newBalance} ${baseUnit}.`
+                        });
+                        
+                    } 
+                    // KASUS B: Pengambilan Total / Fisik (Container Unit)
+                    else {
+                        assetsToMoveIds.push(parentAsset.id);
+                    }
+                } else {
+                    // KASUS C: Aset Unit Biasa (Laptop/Device)
+                    assetsToMoveIds.push(parentAsset.id);
+                }
+            }
+
+            // 3. Batch Update untuk Aset yang benar-benar pindah fisik (Unit utuh atau Drum utuh)
+            if (assetsToMoveIds.length > 0) {
                 const locationText = targetStatus === AssetStatus.IN_STORAGE 
                     ? 'Gudang Inventori' 
                     : targetStatus === AssetStatus.IN_CUSTODY
                         ? `Dipegang oleh ${data.penerima} (Custody)`
                         : `Digunakan oleh ${data.penerima}`;
 
-                await updateAssetBatch(assetIdsInHandover, {
+                // REFACTOR FIX: Gunakan docNumber sebagai referenceId (argumen ke-3)
+                await updateAssetBatch(assetsToMoveIds, {
                     status: targetStatus,
                     currentUser: targetStatus === AssetStatus.IN_STORAGE ? null : data.penerima,
                     location: locationText,
-                }, 'Serah Terima (Handover)');
+                }, newHandover.docNumber);
             }
             
-            // 3. Update Source Document Status (Request / Loan)
+            // 4. Update Source Document Status (Request / Loan)
             if (newHandover.woRoIntNumber) {
-                // A. Handle Loan Request (Prefix: RL or LREQ)
                 if (newHandover.woRoIntNumber.startsWith('RL-') || newHandover.woRoIntNumber.startsWith('LREQ-')) {
-                    // Loan dianggap aktif jika aset keluar (baik USE maupun CUSTODY)
                     if (targetStatus === AssetStatus.IN_USE || targetStatus === AssetStatus.IN_CUSTODY) {
                          await updateLoanRequest(newHandover.woRoIntNumber, {
                             status: LoanRequestStatus.ON_LOAN,
@@ -151,47 +246,30 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
                         });
                     }
                 } 
-                // B. Handle New Asset Request (Prefix: RO or REQ)
                 else if (newHandover.woRoIntNumber.startsWith('RO-') || newHandover.woRoIntNumber.startsWith('REQ-')) {
-                     // LOGIC PERBAIKAN: Fetch fresh state using getState() to guarantee latest data
-                     const freshAssets = useAssetStore.getState().assets;
+                     // Check remaining stock logic (simplified)
+                     const refetchedAssets = useAssetStore.getState().assets;
+                     const allAssetsForRequest = refetchedAssets.filter(a => a.woRoIntNumber === newHandover.woRoIntNumber);
+                     const remainingInStorage = allAssetsForRequest.filter(a => a.status === AssetStatus.IN_STORAGE && (a.currentBalance || 0) > 0);
                      
-                     // Ambil semua aset yang terdaftar untuk request ini
-                     const allAssetsForRequest = freshAssets.filter(a => a.woRoIntNumber === newHandover.woRoIntNumber);
-                     
-                     // CRITICAL FIX: 
-                     // Request dianggap selesai jika aset SUDAH TIDAK di gudang.
-                     // Artinya: Status != IN_STORAGE. 
-                     // (IN_USE = Selesai, IN_CUSTODY = Selesai/Diantar, DAMAGED = Selesai/Issue lain)
-                     // Kita kecualikan assetIdsInHandover dari pengecekan ini karena store mungkin belum update saat baris ini jalan,
-                     // tapi kita tahu mereka baru saja diubah statusnya menjadi targetStatus (yang bukan IN_STORAGE).
-                     
-                     const remainingInStorage = allAssetsForRequest.filter(a => 
-                         !assetIdsInHandover.includes(a.id) && // Kecualikan yang baru saja di-handover
-                         a.status === AssetStatus.IN_STORAGE
-                     );
-
-                     if (remainingInStorage.length === 0) {
-                         // Full Completion
-                         await updateRequest(newHandover.woRoIntNumber, {
-                             status: ItemStatus.COMPLETED,
-                             completionDate: new Date().toISOString(),
-                             completedBy: currentUser.name,
-                             activityLog: [
-                                {
-                                    id: Date.now(),
-                                    author: 'System',
-                                    timestamp: new Date().toISOString(),
-                                    type: 'status_change',
-                                    payload: { text: `Request selesai. Seluruh aset telah diserahkan (Dokumen Terakhir: ${newHandover.docNumber}).` }
-                                }
-                             ]
-                         });
-                     }
+                     await updateRequest(newHandover.woRoIntNumber, {
+                         status: ItemStatus.COMPLETED,
+                         completionDate: new Date().toISOString(),
+                         completedBy: currentUser.name,
+                         activityLog: [
+                            {
+                                id: Date.now(),
+                                author: 'System',
+                                timestamp: new Date().toISOString(),
+                                type: 'status_change',
+                                payload: { text: `Request selesai. Handover tercatat (Ref: ${newHandover.docNumber}).` }
+                            }
+                         ]
+                     });
                 }
             }
 
-            addNotification(`Berita acara serah terima ${newHandover.docNumber} berhasil dibuat.`, "success");
+            addNotification(`Berita acara ${newHandover.docNumber} berhasil dibuat. Stok dan status aset telah diperbarui.`, "success");
             setView('list');
             if(prefillData) onClearPrefill();
         } catch (e) {
@@ -201,7 +279,7 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
             setIsLoading(false);
         }
     };
-    
+
     const handleBulkDelete = async () => {
         setIsLoading(true);
         try {
@@ -237,7 +315,7 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
         exportToCSV(mappedData, filename, extraHeader);
     };
 
-    // Render Helpers
+    // Render Helpers (sama seperti sebelumnya, disingkat untuk fokus pada changes)
     const renderList = () => (
         <div className="p-4 sm:p-6 md:p-8">
             <div className="flex flex-col items-start justify-between gap-4 mb-6 md:flex-row md:items-center">

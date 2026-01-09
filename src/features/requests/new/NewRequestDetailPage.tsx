@@ -479,9 +479,13 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                     {request.items.map((item, index) => {
                                         const itemStatus = request.itemStatuses?.[item.id];
                                         const approvedQuantity = itemStatus?.approvedQuantity;
-                                        const isAdjusted = typeof approvedQuantity === 'number';
+                                        const hasApprovalRecord = typeof approvedQuantity === 'number';
                                         
-                                        const isRejected = isAdjusted && approvedQuantity === 0;
+                                        // LOGIC FIX: "Adjusted" means explicit change (Value Diff). 
+                                        // Prevents strikethrough if values are same.
+                                        const isAdjusted = hasApprovalRecord && approvedQuantity !== item.quantity;
+                                        
+                                        const isRejected = hasApprovalRecord && approvedQuantity === 0;
                                         const isPartiallyApproved = isAdjusted && approvedQuantity! > 0 && approvedQuantity! < item.quantity;
                                         const isStockAllocated = itemStatus?.status === 'stock_allocated';
                                         
@@ -523,18 +527,11 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                             const model = type.standardItems?.find(m => m.name === item.itemName && m.brand === item.itemTypeBrand);
                                             if (model && model.bulkType === 'measurement') {
                                                 isMeasurement = true;
-                                                // If User didn't specify unit (legacy data), use base
-                                                if (!item.unit || item.unit === 'Unit') {
-                                                    displayUnit = model.baseUnitOfMeasure || 'Meter';
-                                                }
-                                            } else {
-                                                if (!item.unit || item.unit === 'Unit') {
-                                                    displayUnit = type.unitOfMeasure || 'Unit';
-                                                }
                                             }
                                         }
 
-                                        // Ensure display unit uses user's selected unit if available and valid
+                                        // DISPLAY UNIT LOGIC FIX: 
+                                        // Always prioritize user selected unit from RequestItem
                                         if (item.unit && item.unit !== 'Unit') {
                                             displayUnit = item.unit;
                                         }
@@ -594,7 +591,8 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                                         {isAdjusted ? (
                                                             <><span className="text-xs text-slate-400 line-through decoration-slate-300">{item.quantity}</span><strong className={`text-lg font-bold ${isRejected ? 'text-red-500' : 'text-amber-600'}`}>{approvedQuantity}</strong></>
                                                         ) : (
-                                                            <strong className="text-lg font-bold text-slate-800">{item.quantity}</strong>
+                                                            // Display the CURRENT EFFECTIVE quantity (Approved if exists, else Original)
+                                                            <strong className="text-lg font-bold text-slate-800">{approvedQuantity ?? item.quantity}</strong>
                                                         )}
                                                         <span className="text-[9px] uppercase font-bold text-slate-500 mt-0.5 tracking-wide bg-slate-100 px-1.5 rounded">{displayUnit}</span>
                                                     </div>

@@ -82,7 +82,7 @@ export const RequestReviewModal: React.FC<RequestReviewModalProps> = ({ isOpen, 
     const maxQty = getMaxAllowedQty(itemId);
 
     if (field === "approvedQuantity") {
-      const numValue = value === "" ? NaN : parseInt(value, 10);
+      const numValue = value === "" ? NaN : Number(value); // FIX: Use Number to support decimals
       // Validasi: Tidak boleh negatif, tidak boleh melebihi maxQty (plafon tahap ini)
       if (!isNaN(numValue) && (numValue < 0 || numValue > maxQty)) return; 
     }
@@ -94,7 +94,7 @@ export const RequestReviewModal: React.FC<RequestReviewModalProps> = ({ isOpen, 
     const maxQty = getMaxAllowedQty(itemId);
 
     // FIX: Cegah pemilihan Partial jika kuantitas max saat ini hanya 1
-    if (action === 'partial' && maxQty <= 1) return;
+    // if (action === 'partial' && maxQty <= 1) return; // REMOVED: Allow partial for floats like 0.5
 
     setItemActions(prev => ({ ...prev, [itemId]: action }));
 
@@ -103,8 +103,9 @@ export const RequestReviewModal: React.FC<RequestReviewModalProps> = ({ isOpen, 
     if (action === "reject") {
         newQty = 0;
     } else if (action === "partial") {
-        // Jika partial, set default ke (max - 1) atau minimal 1
-        newQty = Math.max(1, maxQty - 1);
+        // Jika partial, set default ke nilai yang masuk akal (misal: 0 atau max/2)
+        // Kita set 0 agar user mengetik manual.
+        newQty = 0; 
     } else if (action === "approve") {
         // Jika klik penuh, kembalikan ke maxQty (sesuai tahap ini)
         newQty = maxQty;
@@ -127,8 +128,13 @@ export const RequestReviewModal: React.FC<RequestReviewModalProps> = ({ isOpen, 
       // Jika item sudah di-reject dari tahap sebelumnya (maxQty 0), kita skip validasi
       if (getMaxAllowedQty(item.id) === 0) return true;
 
-      if (!adj || adj.approvedQuantity === "") return false;
+      // Validasi ketat input angka
+      if (!adj || adj.approvedQuantity === "" || isNaN(Number(adj.approvedQuantity))) return false;
+      
       const action = itemActions[item.id];
+      // Jika action partial, pastikan qty > 0 (jika 0 harusnya reject)
+      if (action === 'partial' && Number(adj.approvedQuantity) <= 0) return false;
+      
       // Jika action bukan approve (artinya ada perubahan/penolakan baru di tahap ini), alasan wajib diisi
       if (action !== 'approve' && adj.reason.trim().length < 3) return false;
       return true;
@@ -199,7 +205,6 @@ export const RequestReviewModal: React.FC<RequestReviewModalProps> = ({ isOpen, 
             
             // Cek apakah item ini SUDAH dikurangi oleh approver sebelumnya
             const isReducedPreviously = maxQty < originalUserQty;
-            const canPartial = maxQty > 1;
             const isPreviouslyRejected = maxQty === 0;
 
             if (isPreviouslyRejected) {
@@ -236,11 +241,11 @@ export const RequestReviewModal: React.FC<RequestReviewModalProps> = ({ isOpen, 
                     <div className="text-sm text-slate-600 font-bold flex flex-col gap-1">
                       {isReducedPreviously ? (
                           <div className="flex items-center gap-2 text-amber-700">
-                             <span>Permintaan Tahap Ini: <span className="text-slate-900 font-black text-lg">{maxQty} Unit</span></span>
+                             <span>Permintaan Tahap Ini: <span className="text-slate-900 font-black text-lg">{maxQty} {item.unit || 'Unit'}</span></span>
                              <span className="text-[10px] bg-amber-100 px-1.5 py-0.5 rounded border border-amber-200">(Direvisi dari {originalUserQty})</span>
                           </div>
                       ) : (
-                          <span>Permintaan Awal: <span className="text-slate-900 font-black">{item.quantity} Unit</span></span>
+                          <span>Permintaan Awal: <span className="text-slate-900 font-black">{item.quantity} {item.unit || 'Unit'}</span></span>
                       )}
                     </div>
                   </div>
@@ -257,11 +262,8 @@ export const RequestReviewModal: React.FC<RequestReviewModalProps> = ({ isOpen, 
                     </button>
                     <button 
                       onClick={() => handleActionChange(item.id, 'partial')} 
-                      disabled={!canPartial}
-                      title={!canPartial ? "Tidak bisa revisi parsial (jumlah hanya 1)" : ""}
                       className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-5 py-2 text-[11px] font-black rounded-lg transition-all
-                        ${action === 'partial' ? 'bg-white text-amber-700 shadow-md ring-1 ring-black/5' : 
-                          !canPartial ? 'text-slate-300 cursor-not-allowed bg-slate-100/50' : 'text-slate-500 hover:text-slate-700'}`}
+                        ${action === 'partial' ? 'bg-white text-amber-700 shadow-md ring-1 ring-black/5' : 'text-slate-500 hover:text-slate-700'}`}
                     >
                       {action === 'partial' && <PencilIcon className="w-3.5 h-3.5" />}
                       REVISI
@@ -286,27 +288,20 @@ export const RequestReviewModal: React.FC<RequestReviewModalProps> = ({ isOpen, 
                         {/* Input Angka Manual untuk Presisi */}
                         <input
                             type="number"
-                            min="1"
-                            max={maxQty - 1}
+                            step="0.1" // Allow decimals
+                            min="0"
+                            max={maxQty}
                             value={adj?.approvedQuantity || ''}
                             onChange={e => handleAdjustmentChange(item.id, 'approvedQuantity', e.target.value)}
-                            className="w-20 text-center text-2xl font-black text-tm-primary border-b-2 border-tm-primary/20 focus:border-tm-primary bg-transparent outline-none transition-all"
+                            className="w-24 text-center text-2xl font-black text-tm-primary border-b-2 border-tm-primary/20 focus:border-tm-primary bg-transparent outline-none transition-all"
+                            placeholder="0"
                         />
-                        <span className="text-[10px] font-black text-slate-500">UNIT</span>
+                        <span className="text-[10px] font-black text-slate-500 uppercase">{item.unit || 'UNIT'}</span>
                       </div>
-                    </div>
-                    <div className="relative flex items-center gap-4 px-1">
-                      <span className="text-[10px] font-black text-slate-500">1</span>
-                      <input 
-                        type="range" min="1" max={maxQty - 1} value={parseInt(adj?.approvedQuantity) || 1} 
-                        onChange={e => handleAdjustmentChange(item.id, 'approvedQuantity', e.target.value)}
-                        className="flex-1 h-2.5 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-tm-primary transition-all hover:bg-slate-400"
-                      />
-                      <span className="text-[10px] font-black text-slate-500">{maxQty - 1}</span>
                     </div>
                     {/* Visual Helper */}
                     <div className="flex justify-center items-center gap-2 mt-2">
-                         <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Maksimal Revisi: {maxQty - 1}</span>
+                         <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Maksimal: {maxQty}</span>
                          {isReducedPreviously && <span className="text-[10px] text-amber-600 font-bold">(Sudah dikurangi dari {originalUserQty})</span>}
                     </div>
                   </div>

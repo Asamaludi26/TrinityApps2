@@ -438,6 +438,7 @@ export interface HandoverItem {
     conditionNotes: string;
     quantity: number;
     checked: boolean;
+    unit?: string; // New property to store the unit (Hasbal, Meter, etc)
 }
 
 export interface Handover {

@@ -33,13 +33,15 @@ import {
   BsPerson,
   BsBuilding,
   BsInfoCircle,
-  BsExclamationTriangleFill
+  BsExclamationTriangleFill,
+  BsRulers,
+  BsArrowRight
 } from 'react-icons/bs';
 import DatePicker from '../../../../components/ui/DatePicker';
 import { useAssetStore } from '../../../../stores/useAssetStore';
 import { RequestItemFormState } from '../utils/requestHelpers'; // Import Type
 
-const DRAFT_VERSION = "1.0.4"; 
+const DRAFT_VERSION = "1.0.5"; // Bump version
 const MAX_ITEMS = 15;
 
 interface RequestFormProps {
@@ -48,14 +50,13 @@ interface RequestFormProps {
   assetCategories: AssetCategory[];
   divisions: Division[];
   onCreateRequest: (data: { items: RequestItem[]; order: OrderDetails }) => void;
-  // ADDED: initialItems containing fully prepared state
   initialItems?: RequestItemFormState[];
-  // ADDED: initialOrderType to set order type programmatically
   initialOrderType?: OrderType;
   onCancel: () => void;
 }
 
-const UNIT_OPTIONS = ['Unit', 'Pcs', 'Set', 'Pack', 'Box', 'Meter', 'Roll', 'Batang', 'Lembar', 'Pasang', 'Lot'];
+// Default options for standard items
+const STANDARD_UNIT_OPTIONS = ['Unit', 'Pcs', 'Set', 'Pack', 'Box'];
 
 export const RequestForm: React.FC<RequestFormProps> = ({ 
   currentUser, 
@@ -67,7 +68,6 @@ export const RequestForm: React.FC<RequestFormProps> = ({
   initialOrderType,
   onCancel 
 }) => {
-  // Logic: Initialize state with prefilled items if available, or load draft, or default empty
   const [items, setItems] = useState<RequestItemFormState[]>(() => {
       if (initialItems && initialItems.length > 0) {
           return initialItems;
@@ -78,6 +78,8 @@ export const RequestForm: React.FC<RequestFormProps> = ({
       }];
   });
 
+  const isAtLimit = items.length >= MAX_ITEMS;
+
   const [orderType, setOrderType] = useState<OrderType>(initialOrderType || 'Regular Stock');
   const [justification, setJustification] = useState('');
   const [project, setProject] = useState('');
@@ -87,7 +89,7 @@ export const RequestForm: React.FC<RequestFormProps> = ({
   const [requestDate, setRequestDate] = useState<Date | null>(new Date());
   
   const updateCategories = useAssetStore((state) => state.updateCategories);
-  const checkAvailability = useAssetStore((state) => state.checkAvailability); // Access ATP Logic
+  const checkAvailability = useAssetStore((state) => state.checkAvailability); 
   
   const formRef = useRef<HTMLDivElement>(null);
   const addNotification = useNotification();
@@ -99,15 +101,11 @@ export const RequestForm: React.FC<RequestFormProps> = ({
 
   const categoryNames = useMemo(() => assetCategories.map(c => c.name), [assetCategories]);
 
-  // Effect to update items if initialItems prop changes (e.g. navigation trigger)
-  // This allows the form to react when the parent re-computes the bulk list
   useEffect(() => {
     if (initialItems && initialItems.length > 0) {
        setItems(initialItems);
-       // Reset other fields to defaults when prefill occurs
        if (initialOrderType) {
            setOrderType(initialOrderType);
-           // Auto-fill justification for stock alerts so validation passes without user input
            if (initialOrderType === 'Urgent') {
                setJustification('Restock Stok Kritis (Auto Generated)');
            }
@@ -119,9 +117,7 @@ export const RequestForm: React.FC<RequestFormProps> = ({
     }
   }, [initialItems, initialOrderType]);
 
-  // Logic: Load Draft
   useEffect(() => {
-    // Only check draft if no prefill items were provided
     if (!initialItems) {
         const savedDraft = localStorage.getItem(userDraftKey);
         if (savedDraft) {
@@ -136,7 +132,7 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                 addNotification("Draf permintaan telah dimuat.", "info");
             }
           } catch (e) {
-            // Ignore error, use default
+            // Ignore error
           }
         }
     }
@@ -157,55 +153,65 @@ export const RequestForm: React.FC<RequestFormProps> = ({
     if (items.length > 1) setItems(prev => prev.filter(i => i.id !== id));
   };
 
-  // --- SMART UPDATE STATE with ATP LOGIC ---
+  // --- SMART UPDATE STATE with ATP & Flexible Measurement Logic ---
   const updateItemState = useCallback((id: number, updates: Partial<RequestItemFormState>) => {
     setItems(prev => prev.map(item => {
       if (item.id === id) {
-        // Merge updates
         const nextItem = { ...item, ...updates };
         
-        // 1. Reset logic jika kategori/tipe berubah
+        // Reset Logic on Category Change
         if ('tempCategoryId' in updates && updates.tempCategoryId !== item.tempCategoryId) {
             nextItem.tempTypeId = ''; nextItem.itemName = ''; nextItem.itemTypeBrand = ''; 
             nextItem.availableStock = 0; nextItem.stockDetails = undefined;
         }
         
+        // Reset Logic on Type Change
         if ('tempTypeId' in updates && updates.tempTypeId !== item.tempTypeId) {
             nextItem.itemName = ''; nextItem.itemTypeBrand = ''; 
             nextItem.availableStock = 0; nextItem.stockDetails = undefined;
+            
+            // Auto-detect unit from Type config
             const cat = assetCategories.find(c => c.id.toString() === nextItem.tempCategoryId);
             const typeData = cat?.types.find(t => t.id.toString() === updates.tempTypeId);
             nextItem.unit = typeData?.unitOfMeasure || 'Unit';
         }
 
-        // 2. TRIGGER ATP CHECK (Jika Nama, Brand, atau Qty berubah)
-        // Kita perlu mengecek ketersediaan baru setiap kali user mengubah item atau JUMLAH (untuk fragmentasi)
-        const nameToCheck = 'itemName' in updates ? updates.itemName : item.itemName;
-        const brandToCheck = 'itemTypeBrand' in updates ? updates.itemTypeBrand : item.itemTypeBrand;
-        const qtyToCheck = 'quantity' in updates ? updates.quantity : item.quantity;
-
-        // Model Auto-Fill Logic (Only if itemName changed)
+        // Logic on Model Change (Auto-fill Brand & Smart Unit)
         if ('itemName' in updates && updates.itemName) {
            const cat = assetCategories.find(c => c.id.toString() === nextItem.tempCategoryId);
            const typeData = cat?.types.find(t => t.id.toString() === nextItem.tempTypeId);
            const modelData = typeData?.standardItems?.find(m => m.name === updates.itemName);
            
            if (modelData) {
-               // Auto fill brand from master data if available
                nextItem.itemTypeBrand = modelData.brand || '';
+               
+               // FLEXIBLE UNIT LOGIC:
+               if (!('unit' in updates)) {
+                   if (modelData.bulkType === 'measurement') {
+                       nextItem.unit = modelData.unitOfMeasure || 'Hasbal';
+                   } else {
+                       nextItem.unit = modelData.unitOfMeasure || typeData?.unitOfMeasure || 'Unit';
+                   }
+               }
            }
         }
+
+        // TRIGGER ATP CHECK
+        const nameToCheck = nextItem.itemName;
+        const brandToCheck = nextItem.itemTypeBrand;
+        const qtyToCheck = nextItem.quantity;
+        const unitToCheck = nextItem.unit;
         
-        // Final Stock Check
-        // Gunakan brand terbaru (bisa dari auto-fill di atas atau input manual user)
-        const finalBrand = nextItem.itemTypeBrand;
-        
-        if (nameToCheck && finalBrand) {
-             const stockInfo = checkAvailability(nameToCheck, finalBrand, Number(qtyToCheck));
-             nextItem.availableStock = stockInfo.available;
+        if (nameToCheck && brandToCheck) {
+             // Call ATP check with Context Aware Unit
+             const stockInfo = checkAvailability(nameToCheck, brandToCheck, Number(qtyToCheck), unitToCheck);
+             
+             // Update Display berdasarkan hasil smart dari store
+             nextItem.availableStock = stockInfo.availableSmart;
+
              nextItem.stockDetails = {
-                 physical: stockInfo.physical,
-                 reserved: stockInfo.reserved,
+                 physical: stockInfo.physicalCount,
+                 reserved: stockInfo.reservedCount, // Reserved physical
                  isFragmented: stockInfo.isFragmented
              };
         } else {
@@ -219,10 +225,36 @@ export const RequestForm: React.FC<RequestFormProps> = ({
     }));
   }, [assetCategories, checkAvailability]);
 
+  // Handler khusus untuk perubahan Unit agar bisa reset Qty jika magnitudo berubah
+  const handleUnitChange = (itemId: number, newUnit: string) => {
+      const item = items.find(i => i.id === itemId);
+      if(!item) return;
+
+      // Cek apakah model ini measurement
+      const currentCat = assetCategories.find(c => c.id.toString() === item.tempCategoryId);
+      const currentType = currentCat?.types.find(t => t.id.toString() === item.tempTypeId);
+      const selectedModel = currentType?.standardItems?.find(m => m.name === item.itemName && m.brand === item.itemTypeBrand);
+      
+      let newQty = item.quantity;
+
+      if (selectedModel?.bulkType === 'measurement') {
+          const containerUnit = selectedModel.unitOfMeasure || 'Hasbal';
+          const baseUnit = selectedModel.baseUnitOfMeasure || 'Meter';
+          
+          if (item.unit === baseUnit && newUnit === containerUnit) {
+              if (newQty > 10) { 
+                  newQty = 1;
+                  addNotification("Kuantitas di-reset ke 1 karena perubahan satuan ke fisik (kontainer).", "info");
+              }
+          }
+      }
+
+      updateItemState(itemId, { unit: newUnit, quantity: newQty });
+  };
+
   const fulfillmentStatus = useMemo(() => {
       if (items.some(i => !i.itemName || i.quantity <= 0)) return 'invalid';
-      // Use the calculated ATP from item state
-      const allInStock = items.every(item => item.availableStock >= item.quantity && !item.stockDetails?.isFragmented);
+      const allInStock = items.every(item => item.availableStock >= item.quantity);
       return allInStock ? 'stock' : 'procurement';
   }, [items]);
 
@@ -234,20 +266,11 @@ export const RequestForm: React.FC<RequestFormProps> = ({
         updateItemState(itemId, { tempCategoryId: existingCat.id.toString() });
     } else {
         const newId = Date.now();
-        const newCategory: AssetCategory = {
-            id: newId,
-            name: value.trim(),
-            types: [],
-            associatedDivisions: [],
-            isCustomerInstallable: false
-        };
+        const newCategory: AssetCategory = { id: newId, name: value.trim(), types: [], associatedDivisions: [], isCustomerInstallable: false };
         try {
             await updateCategories([...assetCategories, newCategory]);
             updateItemState(itemId, { tempCategoryId: newId.toString() });
-            addNotification(`Kategori "${value}" ditambahkan.`, 'success');
-        } catch (error) {
-            addNotification("Gagal membuat kategori baru.", "error");
-        }
+        } catch (error) { addNotification("Gagal membuat kategori baru.", "error"); }
     }
   };
 
@@ -262,27 +285,16 @@ export const RequestForm: React.FC<RequestFormProps> = ({
         updateItemState(itemId, { tempTypeId: existingType.id.toString(), unit: existingType.unitOfMeasure || 'Unit' });
     } else {
         const newTypeId = Date.now();
-        const newType: AssetType = {
-            id: newTypeId,
-            name: value.trim(),
-            standardItems: [],
-            classification: 'asset',
-            trackingMethod: 'individual',
-            unitOfMeasure: 'Unit'
-        };
+        const newType: AssetType = { id: newTypeId, name: value.trim(), standardItems: [], classification: 'asset', trackingMethod: 'individual', unitOfMeasure: 'Unit' };
         const updatedCategory = { ...category, types: [...category.types, newType] };
         const updatedCategories = assetCategories.map(c => c.id === category.id ? updatedCategory : c);
-        
         try {
             await updateCategories(updatedCategories);
             updateItemState(itemId, { tempTypeId: newTypeId.toString(), unit: 'Unit' });
-            addNotification(`Tipe "${value}" ditambahkan.`, 'success');
-        } catch (error) {
-            addNotification("Gagal membuat tipe baru.", "error");
-        }
+        } catch (error) { addNotification("Gagal membuat tipe baru.", "error"); }
     }
   };
-
+  
   const handleUpdateTypeConfig = async (itemId: number, categoryId: string, typeId: string, config: { classification: ItemClassification, unit: string }) => {
     const category = assetCategories.find(c => c.id.toString() === categoryId);
     if (!category) return;
@@ -291,14 +303,8 @@ export const RequestForm: React.FC<RequestFormProps> = ({
     const currentType = category.types[typeIndex];
     if (currentType.classification === config.classification && currentType.unitOfMeasure === config.unit) return;
 
-    const updatedType: AssetType = {
-        ...currentType,
-        classification: config.classification,
-        trackingMethod: config.classification === 'material' ? 'bulk' : 'individual',
-        unitOfMeasure: config.unit
-    };
-    const updatedTypes = [...category.types];
-    updatedTypes[typeIndex] = updatedType;
+    const updatedType: AssetType = { ...currentType, classification: config.classification, trackingMethod: config.classification === 'material' ? 'bulk' : 'individual', unitOfMeasure: config.unit };
+    const updatedTypes = [...category.types]; updatedTypes[typeIndex] = updatedType;
     const updatedCategory = { ...category, types: updatedTypes };
     const updatedCategories = assetCategories.map(c => c.id === category.id ? updatedCategory : c);
 
@@ -306,9 +312,7 @@ export const RequestForm: React.FC<RequestFormProps> = ({
         await updateCategories(updatedCategories);
         updateItemState(itemId, { unit: config.unit });
         addNotification(`Konfigurasi tipe diperbarui.`, 'success');
-    } catch (e) {
-        addNotification("Gagal menyimpan konfigurasi tipe.", "error");
-    }
+    } catch (e) { addNotification("Gagal menyimpan konfigurasi tipe.", "error"); }
   };
 
   const handleModelSelect = async (itemId: number, categoryId: string, typeId: string, value: string) => {
@@ -316,25 +320,17 @@ export const RequestForm: React.FC<RequestFormProps> = ({
     if (!value.trim()) return;
     const category = assetCategories.find(c => c.id.toString() === categoryId);
     const type = category?.types.find(t => t.id.toString() === typeId);
-    
     if (category && type) {
         const existingModel = type.standardItems?.find(m => m.name.toLowerCase() === value.trim().toLowerCase());
         if (!existingModel) {
-            const newModel: StandardItem = { 
-                id: Date.now(), 
-                name: value.trim(), 
-                brand: 'Generic' 
-            };
+            const newModel: StandardItem = { id: Date.now(), name: value.trim(), brand: 'Generic' };
             const updatedType = { ...type, standardItems: [...(type.standardItems || []), newModel] };
             const updatedCategory = { ...category, types: category.types.map(t => t.id === type.id ? updatedType : t) };
             const updatedCategories = assetCategories.map(c => c.id === category.id ? updatedCategory : c);
-            
             try {
                 await updateCategories(updatedCategories);
                 updateItemState(itemId, { itemTypeBrand: 'Generic' });
-            } catch (e) {
-                console.error("Failed to sync new model");
-            }
+            } catch (e) { console.error("Failed to sync new model"); }
         } else {
             updateItemState(itemId, { itemTypeBrand: existingModel.brand });
         }
@@ -354,13 +350,11 @@ export const RequestForm: React.FC<RequestFormProps> = ({
     const cleanItems: RequestItem[] = items.map(({ tempCategoryId, tempTypeId, availableStock, unit, stockDetails, ...rest }) => ({
         ...rest,
         categoryId: tempCategoryId,
-        typeId: tempTypeId
+        typeId: tempTypeId,
+        unit: unit 
     }));
 
-    onCreateRequest({
-      items: cleanItems,
-      order: { type: orderType, justification, project }
-    });
+    onCreateRequest({ items: cleanItems, order: { type: orderType, justification, project } });
   };
 
   const handleSaveDraft = () => {
@@ -374,11 +368,7 @@ export const RequestForm: React.FC<RequestFormProps> = ({
         setLastSaved(now);
         window.dispatchEvent(new Event('storage'));
         addNotification(`Draf disimpan pada ${now}`, "success");
-      } catch (e) {
-        addNotification("Gagal menyimpan draf.", "error");
-      } finally {
-        setIsSavingDraft(false);
-      }
+      } catch (e) { addNotification("Gagal menyimpan draf.", "error"); } finally { setIsSavingDraft(false); }
     }, 500);
   };
 
@@ -386,32 +376,19 @@ export const RequestForm: React.FC<RequestFormProps> = ({
     if (window.confirm("Hapus draf ini? Data yang belum disimpan akan hilang.")) {
       localStorage.removeItem(userDraftKey);
       window.dispatchEvent(new Event('storage'));
-      setItems([]);
-      setOrderType('Regular Stock');
-      setJustification('');
-      setProject('');
-      setLastSaved(null);
-      handleAddItem();
-      addNotification("Draf dihapus.", "info");
+      setItems([]); setOrderType('Regular Stock'); setJustification(''); setProject(''); setLastSaved(null); handleAddItem(); addNotification("Draf dihapus.", "info");
     }
   };
 
-  const isAtLimit = items.length >= MAX_ITEMS;
-
   return (
     <div className="space-y-5 animate-fade-in max-w-5xl mx-auto">
-      {/* COMPACT TOOLBAR */}
-      <div className="flex flex-wrap justify-between items-center bg-white px-5 py-3 rounded-xl border border-slate-200 shadow-sm gap-4 no-print sticky top-2 z-10">
+       <div className="flex flex-wrap justify-between items-center bg-white px-5 py-3 rounded-xl border border-slate-200 shadow-sm gap-4 no-print sticky top-2 z-10">
         <div className="flex items-center gap-3">
             <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
                 <BsFileEarmarkPdf className="text-tm-primary w-4 h-4" />
                 Permintaan Barang
             </h4>
-            {lastSaved && (
-                <span className="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100 font-medium">
-                    Draft: {lastSaved}
-                </span>
-            )}
+            {lastSaved && <span className="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100 font-medium">Draft: {lastSaved}</span>}
         </div>
         <div className="flex items-center gap-2">
             <button type="button" onClick={handleSaveDraft} disabled={isSavingDraft} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg text-xs font-semibold hover:bg-slate-100 hover:text-tm-primary transition-all disabled:opacity-50">
@@ -427,69 +404,28 @@ export const RequestForm: React.FC<RequestFormProps> = ({
         <div className="h-1 bg-gradient-to-r from-tm-primary to-tm-accent"></div>
         <div className="p-6 sm:p-10">
           <Letterhead />
-          
-          <div className="text-center my-6">
-              <h2 className="text-xl font-bold text-slate-800 uppercase tracking-wide">Surat Permintaan Barang</h2>
-          </div>
+          <div className="text-center my-6"><h2 className="text-xl font-bold text-slate-800 uppercase tracking-wide">Surat Permintaan Barang</h2></div>
 
           <form onSubmit={handleFormSubmit} className="space-y-8">
               <div className="bg-slate-50/80 p-6 rounded-xl border border-slate-200 shadow-sm">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                      <div>
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">No. Request</label>
-                          <div className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-400 text-sm italic shadow-sm">[Auto: RO-YYMMDD-XXXX]</div>
-                      </div>
-
-                      <div>
-                           <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">No. Dokumen</label>
-                           <div className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-400 text-sm italic shadow-sm">[Auto: RO-YYMMDD-XXXX]</div>
-                      </div>
-
-                      <div>
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Tanggal</label>
-                          <DatePicker id="req-date" selectedDate={requestDate} onDateChange={setRequestDate} />
-                      </div>
-
-                      <div>
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Pemohon</label>
-                          <div className="flex items-center gap-2 w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-slate-700 text-sm font-medium"><BsPerson className="w-4 h-4 text-slate-400"/> {currentUser.name}</div>
-                      </div>
-
-                       <div>
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Divisi</label>
-                          <div className="flex items-center gap-2 w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-slate-700 text-sm font-medium"><BsBuilding className="w-4 h-4 text-slate-400"/> {userDivision}</div>
-                      </div>
-
-                       <div className="relative">
-                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-                              {orderType === 'Regular Stock' ? 'Tipe Order' : (<span className="flex justify-between items-center">Tipe Order<span className="text-tm-primary text-[9px] normal-case bg-blue-50 px-1.5 py-0.5 rounded">Wajib Isi Info</span></span>)}
-                          </label>
-                          <div className="space-y-2">
-                              <select value={orderType} onChange={e => setOrderType(e.target.value as OrderType)} className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-semibold text-slate-700 focus:ring-2 focus:ring-tm-primary/20 focus:border-tm-primary outline-none transition-all shadow-sm">
-                                  <option value="Regular Stock">Regular Stock</option>
-                                  <option value="Urgent">Urgent Request</option>
-                                  <option value="Project Based">Project Based</option>
-                              </select>
-                          </div>
-                      </div>
-
+                      <div><label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">No. Request</label><div className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-400 text-sm italic shadow-sm">[Auto: RO-YYMMDD-XXXX]</div></div>
+                      <div><label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">No. Dokumen</label><div className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-400 text-sm italic shadow-sm">[Auto: RO-YYMMDD-XXXX]</div></div>
+                      <div><label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Tanggal</label><DatePicker id="req-date" selectedDate={requestDate} onDateChange={setRequestDate} /></div>
+                      <div><label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Pemohon</label><div className="flex items-center gap-2 w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-slate-700 text-sm font-medium"><BsPerson className="w-4 h-4 text-slate-400"/> {currentUser.name}</div></div>
+                       <div><label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Divisi</label><div className="flex items-center gap-2 w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-slate-700 text-sm font-medium"><BsBuilding className="w-4 h-4 text-slate-400"/> {userDivision}</div></div>
+                       <div className="relative"><label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">{orderType === 'Regular Stock' ? 'Tipe Order' : (<span className="flex justify-between items-center">Tipe Order<span className="text-tm-primary text-[9px] normal-case bg-blue-50 px-1.5 py-0.5 rounded">Wajib Isi Info</span></span>)}</label><div className="space-y-2"><select value={orderType} onChange={e => setOrderType(e.target.value as OrderType)} className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-semibold text-slate-700 focus:ring-2 focus:ring-tm-primary/20 focus:border-tm-primary outline-none transition-all shadow-sm"><option value="Regular Stock">Regular Stock</option><option value="Urgent">Urgent Request</option><option value="Project Based">Project Based</option></select></div></div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-1 gap-6 mt-4">
                    {orderType !== 'Regular Stock' && (
-                                  <div className="animate-fade-in-down w-full">
-                                      {initialOrderType === 'Urgent' && orderType === 'Urgent' ? (
-                                          <div className="w-full p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800 flex items-center gap-3 shadow-sm">
-                                               <BsInfoCircle className="w-4 h-4 flex-shrink-0 text-blue-600" />
-                                               <div>
-                                                   <p className="font-bold">Mode Restock Otomatis</p>
-                                                   <p className="text-blue-700">Justifikasi telah diisi otomatis oleh sistem berdasarkan peringatan stok.</p>
-                                               </div>
-                                          </div>
-                                      ) : (
-                                          <input type="text" value={orderType === 'Project Based' ? project : justification} onChange={e => orderType === 'Project Based' ? setProject(e.target.value) : setJustification(e.target.value)} placeholder={orderType === 'Project Based' ? "Nama Proyek / Site..." : "Alasan kebutuhan mendesak..."} className="w-full px-3 py-2 bg-white border-2 border-yellow-100 focus:border-tm-primary/50 rounded-lg text-sm text-slate-700 placeholder:text-slate-400 focus:ring-0 outline-none transition-all" />
-                                      )}
-                                  </div>
+                          <div className="animate-fade-in-down w-full">
+                              {initialOrderType === 'Urgent' && orderType === 'Urgent' ? (
+                                  <div className="w-full p-2.5 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800 flex items-center gap-3 shadow-sm"><BsInfoCircle className="w-4 h-4 flex-shrink-0 text-blue-600" /><div><p className="font-bold">Mode Restock Otomatis</p><p className="text-blue-700">Justifikasi telah diisi otomatis oleh sistem berdasarkan peringatan stok.</p></div></div>
+                              ) : (
+                                  <input type="text" value={orderType === 'Project Based' ? project : justification} onChange={e => orderType === 'Project Based' ? setProject(e.target.value) : setJustification(e.target.value)} placeholder={orderType === 'Project Based' ? "Nama Proyek / Site..." : "Alasan kebutuhan mendesak..."} className="w-full px-3 py-2 bg-white border-2 border-yellow-100 focus:border-tm-primary/50 rounded-lg text-sm text-slate-700 placeholder:text-slate-400 focus:ring-0 outline-none transition-all" />
                               )}
+                          </div>
+                      )}
                   </div>
               </div>
 
@@ -507,11 +443,27 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                           const availableModels = currentType?.standardItems || [];
                           const isNewType = currentType && Date.now() - currentType.id < 60000;
                           
-                          // Smart Stock Info
                           const hasStock = item.availableStock > 0;
                           const isFragmented = item.stockDetails?.isFragmented;
                           const reservedStock = item.stockDetails?.reserved || 0;
                           const physicalStock = item.stockDetails?.physical || 0;
+                          
+                          const selectedModel = availableModels.find(m => m.name === item.itemName && m.brand === item.itemTypeBrand);
+                          const isMeasurement = selectedModel?.bulkType === 'measurement';
+                          
+                          // FIX: AVAILABLE UNITS CALCULATION DIRECTLY
+                          let availableUnitOptions = STANDARD_UNIT_OPTIONS.map(u => ({ value: u, label: u }));
+                          
+                          if (isMeasurement && selectedModel) {
+                              availableUnitOptions = [
+                                  { value: selectedModel.unitOfMeasure || 'Hasbal', label: `${selectedModel.unitOfMeasure || 'Hasbal'} (Fisik)` },
+                                  { value: selectedModel.baseUnitOfMeasure || 'Meter', label: `${selectedModel.baseUnitOfMeasure || 'Meter'} (Eceran)` }
+                              ];
+                          } else if (currentType?.unitOfMeasure) {
+                              availableUnitOptions = [{ value: currentType.unitOfMeasure, label: currentType.unitOfMeasure }];
+                          }
+
+                          const isContainerMode = item.unit === selectedModel?.unitOfMeasure;
 
                           return (
                               <div key={item.id} className="group relative bg-white border border-slate-200 rounded-lg shadow-sm hover:border-tm-primary/40 hover:shadow-md transition-all p-4">
@@ -529,55 +481,97 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                                           <div className="grid grid-cols-12 gap-3 items-start">
                                               <div className="col-span-12 sm:col-span-3"><label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">Brand</label><input type="text" value={item.itemTypeBrand} onChange={e => updateItemState(item.id, { itemTypeBrand: e.target.value })} placeholder="Cth: Mikrotik" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700 focus:bg-white focus:border-tm-primary outline-none transition-colors" /></div>
                                               
-                                              {/* SMART STOCK DISPLAY */}
                                               <div className="col-span-4 sm:col-span-2">
-                                                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5 text-center">Stok (ATP)</label>
+                                                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5 text-center">
+                                                    Stok ({isMeasurement ? (isContainerMode ? 'Fisik' : 'Isi') : 'ATP'})
+                                                </label>
                                                 <div className="relative group/stock">
                                                      <input 
                                                         type="text" 
                                                         readOnly 
-                                                        value={item.availableStock} 
+                                                        value={`${item.availableStock} ${item.unit || ''}`} 
                                                         className={`w-full px-3 py-2 border rounded-md text-sm font-bold text-center cursor-default focus:outline-none 
                                                             ${hasStock ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-100 border-slate-200 text-slate-400'}
                                                             ${isFragmented ? 'border-amber-400 bg-amber-50 text-amber-800' : ''}
                                                         `} 
                                                      />
                                                      
-                                                     {/* Conditional Warning Icons */}
-                                                     {isFragmented && (
-                                                         <BsExclamationTriangleFill className="absolute top-1/2 -translate-y-1/2 right-2 text-amber-500 w-3.5 h-3.5" />
-                                                     )}
-                                                     {reservedStock > 0 && !isFragmented && (
-                                                         <BsInfoCircle className="absolute top-1/2 -translate-y-1/2 right-2 text-blue-400 w-3.5 h-3.5" />
-                                                     )}
+                                                     {isFragmented && <BsExclamationTriangleFill className="absolute top-1/2 -translate-y-1/2 right-2 text-amber-500 w-3.5 h-3.5" />}
+                                                     {reservedStock > 0 && !isFragmented && <BsInfoCircle className="absolute top-1/2 -translate-y-1/2 right-2 text-blue-400 w-3.5 h-3.5" />}
 
-                                                     {/* Tooltip Hover */}
-                                                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 p-2 bg-slate-800 text-white text-[10px] rounded shadow-lg opacity-0 group-hover/stock:opacity-100 transition-opacity pointer-events-none z-20">
+                                                     <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2 bg-slate-800 text-white text-[10px] rounded shadow-lg opacity-0 group-hover/stock:opacity-100 transition-opacity pointer-events-none z-20">
                                                         <div className="font-bold border-b border-slate-600 pb-1 mb-1">Status Stok</div>
-                                                        <div className="flex justify-between"><span>Fisik Gudang:</span> <span className="font-mono">{physicalStock}</span></div>
-                                                        <div className="flex justify-between text-amber-300"><span>Sedang Dipesan:</span> <span className="font-mono">{reservedStock}</span></div>
-                                                        <div className="flex justify-between border-t border-slate-600 pt-1 mt-1"><span>Tersedia (ATP):</span> <span className="font-bold text-emerald-400 font-mono">{item.availableStock}</span></div>
+                                                        <div className="flex justify-between"><span>Unit Fisik (Gudang):</span> <span className="font-mono">{physicalStock} {selectedModel?.unitOfMeasure || 'Unit'}</span></div>
+                                                        <div className="flex justify-between text-amber-300"><span>Ter-reservasi:</span> <span className="font-mono">{reservedStock} Unit</span></div>
+                                                        <div className="flex justify-between border-t border-slate-600 pt-1 mt-1">
+                                                            <span>Tersedia ({item.unit}):</span> 
+                                                            <span className="font-bold text-emerald-400 font-mono">{item.availableStock}</span>
+                                                        </div>
+                                                        {isMeasurement && (
+                                                            <div className="mt-1 pt-1 border-t border-slate-600 text-emerald-400 italic">
+                                                                Mode: {isContainerMode ? 'Stok Fisik' : 'Stok Isi (Eceran)'}
+                                                            </div>
+                                                        )}
                                                         {isFragmented && <div className="mt-1 text-amber-400 italic">⚠️ Stok terpecah/fragmented.</div>}
                                                      </div>
                                                 </div>
                                               </div>
 
                                               <div className="col-span-8 sm:col-span-5"><label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">Keterangan</label><input type="text" value={item.keterangan} onChange={e => updateItemState(item.id, { keterangan: e.target.value })} placeholder="Spesifikasi / Keperluan..." className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700 focus:bg-white focus:border-tm-primary outline-none transition-colors placeholder:text-slate-400" /></div>
-                                              <div className="col-span-12 sm:col-span-2 relative group/qty">
-                                                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5 text-center">Jumlah</label>
-                                                  <div className="relative">
-                                                    <input type="number" value={item.quantity} onChange={e => updateItemState(item.id, { quantity: parseInt(e.target.value) || 0 })} min="1" className="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 rounded-md text-sm font-bold text-center text-slate-800 focus:ring-1 focus:ring-tm-primary focus:border-tm-primary outline-none" />
-                                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 uppercase group-hover/qty:text-tm-primary">{item.unit}</span>
+                                              
+                                              <div className="col-span-12 sm:col-span-2 relative">
+                                                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5 text-center">Jumlah & Unit</label>
+                                                  <div className="flex rounded-md shadow-sm">
+                                                    <input 
+                                                        type="number" 
+                                                        value={item.quantity} 
+                                                        onChange={e => updateItemState(item.id, { quantity: parseFloat(e.target.value) || 0 })} 
+                                                        min="0.1" 
+                                                        step={isMeasurement ? "0.1" : "1"} 
+                                                        className="w-1/2 pl-3 pr-1 py-2 bg-white border border-slate-300 rounded-l-md text-sm font-bold text-center text-slate-800 focus:ring-1 focus:ring-tm-primary focus:border-tm-primary outline-none z-10" 
+                                                    />
+                                                    <select
+                                                        value={item.unit}
+                                                        onChange={(e) => handleUnitChange(item.id, e.target.value)}
+                                                        className="w-1/2 pl-2 pr-6 py-2 bg-slate-50 border-y border-r border-slate-300 rounded-r-md text-[10px] font-semibold text-slate-700 focus:ring-1 focus:ring-tm-primary focus:border-tm-primary outline-none appearance-none cursor-pointer hover:bg-slate-100"
+                                                        style={{ backgroundImage: 'none' }}
+                                                    >
+                                                        {availableUnitOptions.map(opt => (
+                                                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                                        ))}
+                                                    </select>
                                                   </div>
                                               </div>
                                           </div>
-                                          {(isNewType || (currentType && !currentType.classification)) && currentCat && currentType && (
-                                                <div className="mt-2 p-2 bg-blue-50/50 border border-blue-100 rounded-md flex flex-wrap items-center gap-2 text-xs">
-                                                    <span className="font-bold text-blue-700 flex items-center gap-1"><BsLightningChargeFill /> Konfigurasi:</span>
-                                                    <button type="button" onClick={() => handleUpdateTypeConfig(item.id, item.tempCategoryId, item.tempTypeId, { classification: 'asset', unit: 'Unit' })} className={`px-2 py-0.5 rounded border ${currentType.classification === 'asset' ? 'bg-blue-100 border-blue-300 text-blue-800' : 'bg-white border-slate-200 text-slate-500'}`}>Device</button>
-                                                    <button type="button" onClick={() => handleUpdateTypeConfig(item.id, item.tempCategoryId, item.tempTypeId, { classification: 'material', unit: 'Pcs' })} className={`px-2 py-0.5 rounded border ${currentType.classification === 'material' ? 'bg-orange-100 border-orange-300 text-orange-800' : 'bg-white border-slate-200 text-slate-500'}`}>Material</button>
-                                                    <select value={item.unit} onChange={(e) => handleUpdateTypeConfig(item.id, item.tempCategoryId, item.tempTypeId, { classification: currentType.classification || 'asset', unit: e.target.value })} className="px-1 py-0.5 border border-slate-200 rounded text-slate-700 bg-white outline-none">{UNIT_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select>
-                                                </div>
+                                          
+                                          {isMeasurement && selectedModel && (
+                                              <div className="mt-2 p-2 bg-indigo-50 border border-indigo-100 rounded-md flex flex-col sm:flex-row items-start sm:items-center gap-2 text-xs text-indigo-800 animate-fade-in-up">
+                                                  <div className="flex items-center gap-2">
+                                                      <BsRulers className="w-3.5 h-3.5" />
+                                                      <span className="font-bold">Info Konversi:</span>
+                                                  </div>
+                                                  <span>
+                                                      1 {selectedModel.unitOfMeasure} (Fisik) = <strong>{selectedModel.quantityPerUnit} {selectedModel.baseUnitOfMeasure}</strong>.
+                                                  </span>
+                                                  {isContainerMode ? (
+                                                      <span className="ml-auto text-[10px] bg-indigo-200 px-2 py-0.5 rounded text-indigo-900 font-bold">
+                                                          Anda meminta {item.quantity} Unit Fisik (Total {item.quantity * (selectedModel.quantityPerUnit || 0)} {selectedModel.baseUnitOfMeasure})
+                                                      </span>
+                                                  ) : (
+                                                       <span className="ml-auto text-[10px] bg-white border border-indigo-200 px-2 py-0.5 rounded text-indigo-700">
+                                                          Permintaan Eceran (Potong)
+                                                      </span>
+                                                  )}
+                                              </div>
+                                          )}
+
+                                          {!isMeasurement && (isNewType || (currentType && !currentType.classification)) && currentCat && currentType && (
+                                            <div className="mt-2 p-2 bg-blue-50/50 border border-blue-100 rounded-md flex flex-wrap items-center gap-2 text-xs">
+                                                <span className="font-bold text-blue-700 flex items-center gap-1"><BsLightningChargeFill /> Konfigurasi:</span>
+                                                <button type="button" onClick={() => handleUpdateTypeConfig(item.id, item.tempCategoryId, item.tempTypeId, { classification: 'asset', unit: 'Unit' })} className={`px-2 py-0.5 rounded border ${currentType.classification === 'asset' ? 'bg-blue-100 border-blue-300 text-blue-800' : 'bg-white border-slate-200 text-slate-500'}`}>Device</button>
+                                                <button type="button" onClick={() => handleUpdateTypeConfig(item.id, item.tempCategoryId, item.tempTypeId, { classification: 'material', unit: 'Pcs' })} className={`px-2 py-0.5 rounded border ${currentType.classification === 'material' ? 'bg-orange-100 border-orange-300 text-orange-800' : 'bg-white border-slate-200 text-slate-500'}`}>Material</button>
+                                                <select value={item.unit} onChange={(e) => handleUpdateTypeConfig(item.id, item.tempCategoryId, item.tempTypeId, { classification: currentType.classification || 'asset', unit: e.target.value })} className="px-1 py-0.5 border border-slate-200 rounded text-slate-700 bg-white outline-none">{STANDARD_UNIT_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select>
+                                            </div>
                                           )}
                                       </div>
                                   </div>
@@ -591,7 +585,12 @@ export const RequestForm: React.FC<RequestFormProps> = ({
               {fulfillmentStatus !== 'invalid' && (
                   <div className={`p-3 rounded-lg border flex items-start gap-3 text-xs ${fulfillmentStatus === 'stock' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
                       <div className={`p-1.5 rounded-full ${fulfillmentStatus === 'stock' ? 'bg-emerald-100' : 'bg-blue-100'}`}>{fulfillmentStatus === 'stock' ? <BsCheckCircleFill className="w-3.5 h-3.5"/> : <BsCart className="w-3.5 h-3.5"/>}</div>
-                      <div><p className="font-bold">{fulfillmentStatus === 'stock' ? 'Stok Tersedia' : 'Perlu Pengadaan'}</p><p className="opacity-90 mt-0.5">{fulfillmentStatus === 'stock' ? 'Semua item tersedia. Langsung ke tahap Serah Terima.' : 'Sebagian item tidak tersedia. Masuk alur persetujuan pengadaan.'}</p></div>
+                      <div>
+                          <p className="font-bold">{fulfillmentStatus === 'stock' ? 'Stok Tersedia' : 'Perlu Pengadaan'}</p>
+                          <p className="opacity-90 mt-0.5">{fulfillmentStatus === 'stock' 
+                              ? 'Semua item tersedia. Item yang terpecah (fragmented) akan dialokasikan dari beberapa unit.' 
+                              : 'Sebagian item tidak tersedia. Masuk alur persetujuan pengadaan.'}</p>
+                      </div>
                   </div>
               )}
 

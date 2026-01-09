@@ -63,13 +63,13 @@ export const useFileAttachment = (initialAttachments: File[] = []) => {
 
     // Fungsi untuk mengubah state internal menjadi format Attachment yang siap simpan (Base64)
     const processAttachmentsForSubmit = useCallback(async (): Promise<Attachment[]> => {
-        const processed = await Promise.all(files.map(async (f) => {
+        const processed: Attachment[] = await Promise.all(files.map(async (f) => {
             const base64 = await fileToBase64(f.file);
             return {
                 id: Date.now() + Math.random(), // ID numerik untuk kompatibilitas tipe Attachment
                 name: f.file.name,
                 url: base64, // Simpan Base64 agar persist di LocalStorage
-                type: f.file.type.startsWith('image/') ? 'image' : 'pdf'
+                type: (f.file.type.startsWith('image/') ? 'image' : 'pdf') as 'image' | 'pdf' | 'other'
             };
         }));
         return processed;

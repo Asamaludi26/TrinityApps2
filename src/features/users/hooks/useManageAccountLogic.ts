@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { User } from '../../../types';
 import { useAuthStore } from '../../../stores/useAuthStore';
+import { useMasterDataStore } from '../../../stores/useMasterDataStore';
 import { useNotification } from '../../../providers/NotificationProvider';
 import * as api from '../../../services/api';
 
@@ -147,8 +148,12 @@ export const useManageAccountLogic = ({ currentUser }: UseManageAccountLogicProp
             };
             
             updateCurrentUserStore(updatedUser);
+            
             // Updating mock/local storage
-            await api.updateData('app_users', (prevUsers: User[]) => prevUsers.map(u => u.id === currentUser.id ? updatedUser : u));
+            // FIX: updateData requires data object, not callback. Fetch current users first.
+            const allUsers = useMasterDataStore.getState().users;
+            const updatedUsersList = allUsers.map(u => u.id === currentUser.id ? updatedUser : u);
+            await api.updateData('app_users', updatedUsersList);
 
             if (isMounted.current) {
                 addNotification('Akun berhasil diperbarui.', 'success');

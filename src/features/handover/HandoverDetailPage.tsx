@@ -5,7 +5,7 @@ import { DetailPageLayout } from '../../components/layout/DetailPageLayout';
 import { Letterhead } from '../../components/ui/Letterhead';
 import { SignatureStamp } from '../../components/ui/SignatureStamp';
 import { ClickableLink } from '../../components/ui/ClickableLink';
-import { HandoverStatusSidebar } from './components/HandoverStatusSidebar'; // IMPORTED NEW COMPONENT
+import { HandoverStatusSidebar } from './components/HandoverStatusSidebar'; 
 
 interface HandoverDetailPageProps {
     handover: Handover;
@@ -85,7 +85,9 @@ const HandoverDetailPage: React.FC<HandoverDetailPageProps> = (props) => {
                                             ) : '-'}
                                         </td>
                                         <td className="p-2 text-gray-600">{item.conditionNotes}</td>
-                                        <td className="p-2 text-center font-medium text-gray-800">{item.quantity} unit</td>
+                                        <td className="p-2 text-center font-medium text-gray-800">
+                                            {item.quantity} {item.unit || 'unit'}
+                                        </td>
                                     </tr>
                                 ))}
                             </tbody>

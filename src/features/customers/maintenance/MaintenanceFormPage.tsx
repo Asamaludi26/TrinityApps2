@@ -288,7 +288,6 @@ const MaintenanceFormPage: React.FC<MaintenanceManagementPageProps> = (props) =>
                         assets={assets}
                         users={users}
                         maintenances={maintenances}
-                        assetCategories={assetCategories}
                         onSave={handleSave}
                         onCancel={() => setView('list')}
                         isLoading={isLoading}

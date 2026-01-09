@@ -57,7 +57,7 @@ export interface StockItem {
     
     // Balances (Saldo Isi untuk Measurement)
     storageBalance: number; // Sisa meteran di gudang (Available Balance)
-    inUseBalance: number;   // Total meteran terpasang (Calculated from Transactions)
+    inUseBalance: number;   // Total meteran terpasang / Dipegang Teknisi (Updated Logic)
     damagedBalance: number; // Total meteran rusak
     grandTotalBalance: number; // Total kapasitas awal yang dibeli (Initial Balance Sum)
     
@@ -234,17 +234,20 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
         
         // 1. Initialize Map
         activeAssets.forEach(asset => {
-             const key = `${asset.name}|${asset.brand}`;
+             // Normalized Name: Hilangkan suffix "(Potongan)" agar tergabung dengan induknya
+             const normalizedName = asset.name.replace(' (Potongan)', '').trim();
+             const key = `${normalizedName}|${asset.brand}`;
+             
             if (!stockMap.has(key)) {
                 // Lookup Model/Type details for Measurement Logic
                 const category = assetCategories.find(c => c.name === asset.category);
                 const type = category?.types.find(t => t.name === asset.type);
-                const model = type?.standardItems?.find(m => m.name === asset.name && m.brand === asset.brand);
+                const model = type?.standardItems?.find(m => m.name === normalizedName && m.brand === asset.brand);
                 
                 const isMeasurement = model?.bulkType === 'measurement';
 
                 stockMap.set(key, { 
-                    name: asset.name, 
+                    name: normalizedName, 
                     category: asset.category, 
                     brand: asset.brand, 
                     inStorage: 0, 
@@ -270,7 +273,8 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
         
          // 2. Aggregate Asset Data
          activeAssets.forEach(asset => {
-            const key = `${asset.name}|${asset.brand}`;
+            const normalizedName = asset.name.replace(' (Potongan)', '').trim();
+            const key = `${normalizedName}|${asset.brand}`;
             const current = stockMap.get(key);
             
             if (current) {
@@ -280,9 +284,12 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
                 // MEASUREMENT AGGREGATION (Content Level)
                 // Use fallback to initialBalance if currentBalance is not yet set (new items)
                 const currentContent = typeof asset.currentBalance === 'number' ? asset.currentBalance : (asset.initialBalance || 0);
-                const initialContent = asset.initialBalance || 0;
-
-                if (current.isMeasurement) {
+                
+                // Only add to Grand Total if it's NOT a child asset (potongan) to avoid double counting capacity
+                // Child asset names usually contain "(Potongan)" or have a parent ID reference
+                const isChild = asset.id.includes('-PART-') || asset.name.includes('(Potongan)');
+                if (current.isMeasurement && !isChild) {
+                    const initialContent = asset.initialBalance || 0;
                     current.grandTotalBalance += initialContent;
                 }
 
@@ -298,8 +305,13 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
                         break;
                         
                     case AssetStatus.IN_USE: 
+                    case AssetStatus.IN_CUSTODY: // Include Custody as 'In Use' for stock view
                         current.inUse++; 
-                        // Logic for Measurement IN_USE is handled via Transaction History below
+                        
+                        // NEW LOGIC: Calculate In Use Balance from Assets currently in custody/use
+                        if (current.isMeasurement) {
+                            current.inUseBalance += currentContent;
+                        }
                         break;
                         
                     case AssetStatus.DAMAGED: 
@@ -314,8 +326,8 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
             }
         });
 
-        // 3. Aggregate Usage History (Installations & Maintenance) for Measurement/Bulk items
-        // This gives accurate "Digunakan" numbers for cables/connectors
+        // 3. Aggregate Usage History (Consumed items from Installations) 
+        // This adds to "In Use" for consumed materials which no longer exist as assets
         const usageMap = new Map<string, { totalQty: number, docs: {docNumber: string, qty: number, type: 'install' | 'maintenance'}[] }>();
 
         const processUsage = (itemName: string, brand: string, quantity: number, docNumber: string, type: 'install' | 'maintenance') => {
@@ -346,8 +358,8 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
              const usage = usageMap.get(key);
              if (usage) {
                  if (item.isMeasurement || item.trackingMethod === 'bulk') {
-                     // For measurement, use transaction history for In Use balance
-                     item.inUseBalance = usage.totalQty;
+                     // Add consumed amount to existing in-use balance (from child assets)
+                     item.inUseBalance += usage.totalQty;
                      item.usageDetails = usage.docs;
                  }
              }
@@ -359,9 +371,6 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
      const summaryData = useMemo(() => {
         if (currentUser.role === 'Staff') return null;
         
-        // Smart count for low stock
-        // UPDATED: Now compares PHYSICAL COUNT (Containers/Units) against threshold for ALL items.
-        // Even for cables, we care if we have < 2 drums left, not if we have < 2 meters.
         const lowStockItems = aggregatedStock.filter(item => {
             const key = `${item.name}|${item.brand}`;
             const threshold = thresholds[key] ?? (item.isMeasurement ? DEFAULT_MEASUREMENT_THRESHOLD : DEFAULT_UNIT_THRESHOLD);
@@ -405,9 +414,8 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
                 if (!filters.lowStockOnly && !filters.outOfStockOnly) return true;
                 const key = `${item.name}|${item.brand}`;
                 
-                // Smart Threshold Logic for Filtering as well
                 const threshold = thresholds[key] ?? (item.isMeasurement ? DEFAULT_MEASUREMENT_THRESHOLD : DEFAULT_UNIT_THRESHOLD);
-                const stockCount = item.inStorage; // Physical Count
+                const stockCount = item.inStorage; 
                 
                 if (filters.lowStockOnly) return stockCount > 0 && stockCount <= threshold;
                 if (filters.outOfStockOnly) return stockCount === 0;
@@ -421,7 +429,6 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
     const startIndex = (currentPage - 1) * itemsPerPage;
     const paginatedStock = sortedStock.slice(startIndex, startIndex + itemsPerPage);
 
-    // ... (Rest of code remains same for Damage Report logic) ...
     // --- DAMAGE REPORT LOGIC ---
     const handleReportDamageClick = (asset: Asset) => {
         setAssetToReport(asset);

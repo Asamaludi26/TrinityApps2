@@ -14,6 +14,11 @@ interface StagingModalProps {
     onProceed: (itemToRegister: any) => void;
 }
 
+// Utility: Safe rounding
+const safeRound = (num: number): number => {
+    return Math.round((num + Number.EPSILON) * 10000) / 10000;
+};
+
 export const StagingModal: React.FC<StagingModalProps> = ({
     isOpen,
     onClose,
@@ -42,8 +47,8 @@ export const StagingModal: React.FC<StagingModalProps> = ({
             // Ambil data yang sudah teregistrasi (default 0 jika undefined)
             const registeredQty = request.partiallyRegisteredItems?.[item.id] || 0;
             
-            // Hitung sisa (Pastikan tidak negatif)
-            const remainingQty = Math.max(0, approvedQty - registeredQty);
+            // Hitung sisa (Pastikan tidak negatif dan aman dari float error)
+            const remainingQty = Math.max(0, safeRound(approvedQty - registeredQty));
             
             const isCompleted = remainingQty === 0;
 

@@ -39,48 +39,63 @@ export const prepareInitialItems = (
 
   return rawItems.map((item, idx) => {
     // 1. Cari Kategori dan Tipe berdasarkan Nama Item
-    const category = categories.find(c => 
+    let category = categories.find(c => 
       c.types.some(t => t.standardItems?.some(si => 
         si.name.toLowerCase() === item.name.toLowerCase() && 
         si.brand.toLowerCase() === item.brand.toLowerCase()
       ))
     );
     
-    const type = category?.types.find(t => 
+    let type = category?.types.find(t => 
       t.standardItems?.some(si => 
         si.name.toLowerCase() === item.name.toLowerCase() && 
         si.brand.toLowerCase() === item.brand.toLowerCase()
       )
     );
 
-    // 2. Hitung Stok Tersedia Menggunakan ATP Logic (Store)
-    // Asumsi awal qty = 1 untuk pengecekan fragmentasi
-    const stockInfo = checkAvailability(item.name, item.brand, 1);
-    const stockCount = stockInfo.available;
-        
-    // 3. LOGIKA BARU: Gunakan ambang batas yang dikirim, atau fallback ke default
-    const targetStock = item.threshold ?? DEFAULT_RESTOCK_TARGET;
-    const neededQuantity = Math.max(1, targetStock - stockCount);
+    // Get specific model to check bulk type
+    const model = type?.standardItems?.find(m => m.name.toLowerCase() === item.name.toLowerCase() && m.brand.toLowerCase() === item.brand.toLowerCase());
 
-    // 4. Generate Note yang lebih informatif
-    const note = stockCount === 0 
-      ? `Restock: Stok Habis. Pengadaan ${neededQuantity} unit untuk mencapai target stok (${targetStock} unit).` 
-      : `Restock: Stok Menipis (sisa ${stockCount} unit). Pengadaan ${neededQuantity} unit untuk mencapai target stok (${targetStock} unit).`;
+    // 2. Tentukan Unit Default
+    let unit = 'Unit';
+    if (model?.bulkType === 'measurement') {
+        unit = model.unitOfMeasure || 'Hasbal';
+    } else {
+        unit = type?.unitOfMeasure || 'Unit';
+    }
 
-    // 5. Construct Object Form
+    // 3. Hitung Stok Tersedia Menggunakan ATP Logic (Store) - Context Aware
+    const stockInfo = checkAvailability(item.name, item.brand, 1, unit);
+    const stockCount = stockInfo.availableSmart; 
+    
+    // 4. Kalkulasi Kebutuhan
+    let targetStock = item.threshold ?? DEFAULT_RESTOCK_TARGET;
+    // Jika restock measurement (Hasbal), threshold biasanya dalam unit fisik (e.g. 2 Drum).
+    // Jadi perbandingan langsung aman.
+    
+    // Physical stock for calculation logic (always want physical units for ordering)
+    const currentPhysical = stockInfo.physicalCount;
+    const neededQuantity = Math.max(1, targetStock - currentPhysical);
+
+    // 5. Generate Note yang lebih informatif
+    const note = currentPhysical === 0 
+      ? `Restock: Stok Habis. Pengadaan ${neededQuantity} ${unit} untuk mencapai target.` 
+      : `Restock: Stok Menipis (sisa ${currentPhysical} ${unit}). Pengadaan ${neededQuantity} ${unit} untuk mencapai target.`;
+
+    // 6. Construct Object Form
     return {
       id: Date.now() + idx,
       itemName: item.name,
       itemTypeBrand: item.brand,
-      quantity: neededQuantity, // Kuantitas cerdas
+      quantity: neededQuantity, 
       keterangan: note,
       tempCategoryId: category?.id.toString() || '',
       tempTypeId: type?.id.toString() || '',
-      availableStock: stockCount,
-      unit: type?.unitOfMeasure || 'Unit',
+      availableStock: stockCount, 
+      unit: unit,
       stockDetails: {
-          physical: stockInfo.physical,
-          reserved: stockInfo.reserved,
+          physical: stockInfo.physicalCount,
+          reserved: stockInfo.reservedCount,
           isFragmented: stockInfo.isFragmented
       }
     };

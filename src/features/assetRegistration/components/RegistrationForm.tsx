@@ -33,9 +33,10 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = (props) => {
 
     // 1. Initialize Logic Hook
     const {
-        formData, updateField, selectedCategoryId, assetTypeId, selectedCategory, selectedType,
+        formData, updateField, selectedCategoryId, assetTypeId, selectedCategory, selectedType, selectedModel,
         availableModels, handleCategoryChange, handleTypeChange, handleModelChange,
-        addBulkItem, removeBulkItem, updateBulkItem, handleScanResult, handleSubmit, canViewPrice, isEditing
+        addBulkItem, removeBulkItem, updateBulkItem, handleScanResult, handleSubmit, canViewPrice, isEditing,
+        generateMeasurementItems, currentStockCount
     } = useRegistrationForm({
         currentUser,
         assetCategories,
@@ -43,10 +44,6 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = (props) => {
         editingAsset,
         onSave
     }) as any; 
-    // Type assertion to any as a temporary fix if the hook doesn't return these properties but the component logic relies on them, 
-    // OR ideally we remove selectedCategoryId and assetTypeId if they are not returned.
-    // Based on the error log, the hook DOES NOT return selectedCategoryId and assetTypeId.
-    // We should rely on formData.categoryId and formData.typeId or selectedCategory.id
 
     // 2. Initialize Calc Hook
     const { warrantyPeriod, setWarrantyPeriod } = useAssetCalculations(
@@ -57,7 +54,8 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = (props) => {
     // 3. Helper: Wrap Scanner Trigger to register callback first
     const handleStartScanWrapper = (itemId: number | string) => {
         // Register the callback in the parent Page/Layout
-        setFormScanCallback((result: ParsedScanResult) => {
+        // FIX: Wrap the callback in an arrow function so React stores the function instead of executing it as an updater
+        setFormScanCallback(() => (result: ParsedScanResult) => {
              // Bridge the result to the hook
              handleScanResult(itemId, result);
         });
@@ -158,6 +156,9 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = (props) => {
                     selectedType={selectedType} isEditing={isEditing}
                     addBulkItem={addBulkItem} removeBulkItem={removeBulkItem} updateBulkItem={updateBulkItem}
                     onStartScan={handleStartScanWrapper}
+                    selectedModel={selectedModel}
+                    generateMeasurementItems={generateMeasurementItems}
+                    currentStockCount={currentStockCount}
                 />
 
                 <FinancialSection 
