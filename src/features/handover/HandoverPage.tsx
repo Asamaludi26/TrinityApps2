@@ -167,7 +167,10 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
                         });
 
                         // B. Buat "Child Asset" (Potongan) untuk Penerima
-                        const childAssetId = `${parentAsset.id}-PART-${Date.now().toString().slice(-4)}`;
+                        // FIX: Generate clean ID to prevent recursion (-PART-PART-...)
+                        // Use original base ID if possible, otherwise just use UUID
+                        const baseId = parentAsset.id.split('-PART-')[0];
+                        const childAssetId = `${baseId}-PART-${Date.now().toString().slice(-6)}`;
                         
                         const childAsset: Asset = {
                             ...parentAsset,

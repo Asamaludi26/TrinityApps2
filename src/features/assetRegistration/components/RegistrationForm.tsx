@@ -31,9 +31,9 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = (props) => {
         onStartScan, setFormScanCallback
     } = props;
 
-    // 1. Initialize Logic Hook
+    // 1. Initialize Logic Hook - REMOVED 'as any' cast
     const {
-        formData, updateField, selectedCategoryId, assetTypeId, selectedCategory, selectedType, selectedModel,
+        formData, updateField, selectedCategory, selectedType, selectedModel,
         availableModels, handleCategoryChange, handleTypeChange, handleModelChange,
         addBulkItem, removeBulkItem, updateBulkItem, handleScanResult, handleSubmit, canViewPrice, isEditing,
         generateMeasurementItems, currentStockCount
@@ -43,7 +43,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = (props) => {
         prefillData,
         editingAsset,
         onSave
-    }) as any; 
+    }); 
 
     // 2. Initialize Calc Hook
     const { warrantyPeriod, setWarrantyPeriod } = useAssetCalculations(
@@ -54,7 +54,6 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = (props) => {
     // 3. Helper: Wrap Scanner Trigger to register callback first
     const handleStartScanWrapper = (itemId: number | string) => {
         // Register the callback in the parent Page/Layout
-        // FIX: Wrap the callback in an arrow function so React stores the function instead of executing it as an updater
         setFormScanCallback(() => (result: ParsedScanResult) => {
              // Bridge the result to the hook
              handleScanResult(itemId, result);
@@ -88,7 +87,7 @@ export const RegistrationForm: React.FC<RegistrationFormProps> = (props) => {
         setIsSubmitting(true);
         // Validasi tambahan jika perlu dilakukan di sini sebelum ke hook
         handleSubmit(e);
-        // Reset loading if validation fails inside hook (requires hook refactor to return success)
+        // Reset loading if validation fails inside hook
         setTimeout(() => setIsSubmitting(false), 2000); 
     };
 

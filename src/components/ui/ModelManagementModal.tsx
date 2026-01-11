@@ -273,7 +273,7 @@ export const ModelManagementModal: React.FC<ModelManagementModalProps> = ({
                                         />
                                         <div className="text-sm">
                                             <span className="font-bold text-gray-700 block flex items-center gap-1"><BsRulers className="text-orange-500"/> Habis Perlahan (Measurement)</span>
-                                            <span className="text-gray-500 text-xs">Cth: Kabel (Hasbal -> Meter)</span>
+                                            <span className="text-gray-500 text-xs">Cth: Kabel (Hasbal = Meter)</span>
                                         </div>
                                     </label>
                                 </div>

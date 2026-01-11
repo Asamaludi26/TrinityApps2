@@ -4,7 +4,7 @@ import { Asset, AssetCondition, Request, RequestItem, User, AssetCategory, Asset
 import { RegistrationFormData } from '../types';
 import { useNotification } from '../../../providers/NotificationProvider';
 import { generateUUID } from '../../../utils/uuid';
-import { useAssetStore } from '../../../stores/useAssetStore'; // Need store to check current stock for Count types
+import { useAssetStore } from '../../../stores/useAssetStore'; 
 
 interface UseRegistrationFormProps {
     currentUser: User;
@@ -69,28 +69,24 @@ export const useRegistrationForm = ({
 
     const availableModels = useMemo(() => selectedType?.standardItems || [], [selectedType]);
 
-    // Find the actual model object based on selected name/brand to get bulk config
     const selectedModel = useMemo(() => 
         availableModels.find(m => m.name === formData.assetName && m.brand === formData.brand),
     [availableModels, formData.assetName, formData.brand]);
     
     const canViewPrice = ['Admin Purchase', 'Super Admin'].includes(currentUser.role);
     
-    // Calculate current stock count for "Count" type visual feedback
     const currentStockCount = useMemo(() => {
         if (selectedType?.trackingMethod === 'bulk' && selectedModel?.bulkType !== 'measurement') {
             return assets.filter(a => 
                 a.name === formData.assetName && 
                 a.brand === formData.brand && 
                 a.status === 'Di Gudang'
-            ).reduce((acc, curr) => acc + (curr.inStorage || 1), 0); // Logic simplifikasi, real implementation depends on how Count assets stored
-            // Note: Simplifikasi untuk demo. Real logic ada di useAssetStore.
+            ).reduce((acc, curr) => acc + (curr.inStorage || 1), 0);
         }
         return 0;
     }, [assets, selectedType, selectedModel, formData.assetName, formData.brand]);
 
-
-    // --- EFFECT: PREFILL DATA (STAGING) ---
+    // --- EFFECTS ---
     useEffect(() => {
         if (prefillData?.request && prefillData.itemToRegister) {
             const { request, itemToRegister } = prefillData;
@@ -121,7 +117,6 @@ export const useRegistrationForm = ({
             
             const isBulkTracking = foundType?.trackingMethod === 'bulk';
             
-            // For measurement/bulk, initially we don't know the exact drum split, so start empty or single
             const initialBulkItems = isBulkTracking 
                 ? [] 
                 : Array.from({ length: quantityToRegister }, () => ({ id: generateUUID(), serialNumber: '', macAddress: '' }));
@@ -138,8 +133,6 @@ export const useRegistrationForm = ({
                 brand: itemToRegister.itemTypeBrand,
                 requestDescription: itemToRegister.keterangan || '',
                 relatedRequestDocNumber: request.docNumber || request.id,
-                notes: '',
-                currentUser: null,
                 quantity: quantityToRegister,
                 bulkItems: initialBulkItems,
                 purchasePrice: canViewPrice && details ? (details.purchasePrice as number) : null,
@@ -153,7 +146,6 @@ export const useRegistrationForm = ({
         }
     }, [prefillData, assetCategories, canViewPrice]);
 
-    // --- EFFECT: EDIT MODE ---
     useEffect(() => {
         if (isEditing && editingAsset) {
             const cat = assetCategories.find(c => c.name === editingAsset.category);
@@ -186,7 +178,6 @@ export const useRegistrationForm = ({
                     id: generateUUID(),
                     serialNumber: editingAsset.serialNumber || '',
                     macAddress: editingAsset.macAddress || '',
-                    // Load balance if editing measurement asset
                     initialBalance: editingAsset.initialBalance,
                     currentBalance: editingAsset.currentBalance
                 }],
@@ -196,7 +187,6 @@ export const useRegistrationForm = ({
         }
     }, [isEditing, editingAsset, assetCategories, currentUser.name]);
 
-    // --- HANDLERS ---
     const updateField = useCallback((field: keyof RegistrationFormData, value: any) => {
         setFormData(prev => ({ ...prev, [field]: value }));
     }, []);
@@ -235,14 +225,12 @@ export const useRegistrationForm = ({
     }, [availableModels]);
 
     const addBulkItem = useCallback(() => {
-        // Validation for prefill limits...
         if (prefillData?.itemToRegister) {
              const { request, itemToRegister } = prefillData;
              const approvedQty = request.itemStatuses?.[itemToRegister.id]?.approvedQuantity ?? itemToRegister.quantity;
              const registeredQty = request.partiallyRegisteredItems?.[itemToRegister.id] || 0;
              const remaining = approvedQty - registeredQty;
              
-             // Count current items, excluding those that might be deleted/filtered in complex logic
              if (formData.bulkItems.length >= remaining) {
                  addNotification('Jumlah item sudah mencapai batas sisa kuantitas.', 'warning');
                  return;
@@ -256,12 +244,10 @@ export const useRegistrationForm = ({
     }, [prefillData, formData.bulkItems.length, addNotification]);
 
     const removeBulkItem = useCallback((id: string | number) => {
-        if (formData.bulkItems.length > 0) { // Allow empty list for Measurement generator
+        if (formData.bulkItems.length > 0) { 
             setFormData(prev => ({
                 ...prev,
                 bulkItems: prev.bulkItems.filter(item => item.id !== id),
-                // Only update quantity if it matches array length (for individual)
-                // For measurement, quantity is length of array (drums)
                 quantity: prev.bulkItems.length - 1 
             }));
         }
@@ -290,11 +276,10 @@ export const useRegistrationForm = ({
          }));
     }, []);
 
-    // New: Batch Generator for Measurement
     const generateMeasurementItems = useCallback((qty: number, lengthPerUnit: number) => {
         const newItems = Array.from({ length: qty }, (_, i) => ({
             id: generateUUID(),
-            serialNumber: `BATCH-${Date.now().toString().slice(-6)}-${i+1}`, // Auto generate temp batch ID
+            serialNumber: `BATCH-${Date.now().toString().slice(-6)}-${i+1}`,
             macAddress: '',
             initialBalance: lengthPerUnit,
             currentBalance: lengthPerUnit
@@ -303,7 +288,7 @@ export const useRegistrationForm = ({
         setFormData(prev => ({
             ...prev,
             bulkItems: newItems,
-            quantity: qty // For bulk measurement, quantity refers to number of physical units (drums)
+            quantity: qty
         }));
 
         addNotification(`${qty} item dengan panjang ${lengthPerUnit} berhasil dibuat.`, 'success');
@@ -317,13 +302,11 @@ export const useRegistrationForm = ({
         const targetModel = availableModels.find(m => m.name === formData.assetName && m.brand === formData.brand) || selectedModel;
         const isMeasurementType = isBulkTracking && targetModel?.bulkType === 'measurement';
 
-        // 1. Validation Logic
         if (!formData.categoryId || !formData.typeId) {
             addNotification('Kategori dan Tipe aset wajib dipilih.', 'error');
             return;
         }
         
-        // 2. Quantity Logic
         const quantityNum = Number(formData.quantity);
         if (!formData.quantity || (isNaN(quantityNum) || quantityNum <= 0)) {
              addNotification('Jumlah aset (quantity) harus lebih dari 0.', 'error');
@@ -332,39 +315,26 @@ export const useRegistrationForm = ({
 
         if (isBulkTracking) {
              if (isMeasurementType) {
-                 // For Measurement:
-                 // We create N assets (rows in bulkItems), each representing a physical drum/roll
                  if (finalBulkItems.length === 0) {
                      addNotification('Harap generate rincian item (batch generator) terlebih dahulu.', 'error');
                      return;
                  }
-                 
-                 // Ensure all items have balance
                  if (finalBulkItems.some(i => !i.initialBalance || i.initialBalance <= 0)) {
                       addNotification('Semua item measurement harus memiliki saldo awal (Isi/Panjang).', 'error');
                       return;
                  }
              } else {
-                 // For Count (Bijian):
-                 // Use a dummy bulk item just to pass structure, quantity holds the value.
-                 // We don't create 1000 rows for 1000 connectors.
-                 // We create 1 Asset entry representing the *batch addition* or update existing pool.
-                 // (Simplified Logic: Create 1 asset entry with quantity property in meta or just update store directly)
-                 // NOTE: In this app architecture, addAsset creates an entry in 'assets' array.
-                 // For Count, we usually treat it as "1 box of X".
                  if (finalBulkItems.length === 0) {
                      finalBulkItems = [{ id: generateUUID(), serialNumber: '', macAddress: '' }];
                  }
              }
         } else {
-             // Individual Check
              if (finalBulkItems.some(i => !i.serialNumber.trim())) {
                  addNotification('Nomor Seri wajib diisi untuk semua unit.', 'error');
                  return;
              }
         }
         
-        // Simpan data
         const finalData: RegistrationFormData = {
             ...formData,
             bulkItems: finalBulkItems,
