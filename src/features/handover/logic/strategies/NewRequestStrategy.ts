@@ -1,7 +1,9 @@
 
 import { Request, Asset, User, AssetStatus, HandoverItem } from '../../../../types';
 import { HandoverInitialState } from '../handoverTypes';
-import { useAssetStore } from '../../../../stores/useAssetStore';
+
+// Helper untuk generate ID unik sementara
+const genId = () => Date.now() + Math.random();
 
 export const strategyFromNewRequest = (
     request: Request, 
@@ -10,145 +12,128 @@ export const strategyFromNewRequest = (
 ): HandoverInitialState => {
     const recipientUser = users.find(u => u.name === request.requester);
     
-    // Akses Logic Store (The "Brain")
-    const { checkAvailability } = useAssetStore.getState();
-
-    // 1. Ambil Aset Hasil Pengadaan (Procurement) - Prioritas Utama
-    const procurementAssets = assets.filter(asset => 
-        asset.woRoIntNumber === request.id && asset.status === AssetStatus.IN_STORAGE
+    // 1. Identifikasi Aset Baru (Hasil Pengadaan)
+    const newProcuredAssets = assets.filter(asset => 
+        (asset.woRoIntNumber === request.id || asset.poNumber === request.id) && 
+        asset.status === AssetStatus.IN_STORAGE
     );
 
-    // Set untuk melacak aset fisik yang sudah "di-booking" oleh logika ini
-    const strategyUsedAssetIds = new Set<string>(procurementAssets.map(a => a.id));
-    
-    const stockAllocationItems: HandoverItem[] = [];
-    
-    // 2. Proses Item dari Stok (Stock Allocation)
-    const stockItems = request.items.filter(item => {
-        const status = request.itemStatuses?.[item.id];
-        return status?.status === 'stock_allocated'; // Hanya yang disetujui dari stok
-    });
+    const handoverItems: HandoverItem[] = [];
+    const usedAssetIds = new Set<string>();
 
-    stockItems.forEach(item => {
-        const approvedQty = request.itemStatuses?.[item.id]?.approvedQuantity ?? item.quantity;
-        const requestedUnit = item.unit || 'Unit'; 
-
-        // Cek ketersediaan & Tipe Unit via Store Logic
-        // checkAvailability akan memberitahu kita apakah ini request 'Container' atau 'Base'
-        const availability = checkAvailability(item.itemName, item.itemTypeBrand, approvedQty, requestedUnit);
+    // 2. Iterasi setiap item dalam Request
+    request.items.forEach(reqItem => {
+        const itemStatus = request.itemStatuses?.[reqItem.id];
         
-        // Filter kandidat
-        const validSourceIds = availability.recommendedSourceIds.filter(id => {
-            if (availability.unitType === 'base') return true; 
-            return !strategyUsedAssetIds.has(id);
-        });
-        
-        // --- LOGIC KLASIFIKASI CERDAS (CONTAINER vs BASE) ---
-        
-        if (availability.isMeasurement && availability.unitType === 'base') {
-            // KASUS A: REQUEST POTONGAN / ECERAN (CUT)
-            // User minta "Meter", stok berupa "Hasbal"
-            
-            const suggestedAssetId = validSourceIds.length > 0 ? validSourceIds[0] : '';
-            
-            stockAllocationItems.push({
-                id: Date.now() + Math.random(),
-                assetId: suggestedAssetId, 
-                itemName: item.itemName,
-                itemTypeBrand: item.itemTypeBrand,
-                // UX: Beri label jelas bahwa ini adalah pemotongan
-                conditionNotes: `Potong: ${approvedQty} ${requestedUnit}`, 
-                quantity: approvedQty, 
-                checked: true,
-                unit: requestedUnit // Penting: Unit 'Meter' akan memicu 'Cut Logic' di Form
-            });
+        if (itemStatus?.status === 'rejected') return;
 
-        } else {
-            // KASUS B: REQUEST UNIT UTUH / KONTAINER (MOVE)
-            // User minta "1 Hasbal" atau "1 Unit Router"
-            
-            const idsToTake = validSourceIds.slice(0, approvedQty);
-            const targetUnit = availability.isMeasurement ? (availability.containerUnit || 'Hasbal') : requestedUnit;
+        const targetQty = itemStatus?.approvedQuantity ?? reqItem.quantity;
+        const requestedUnit = reqItem.unit || 'Unit';
 
-            if (idsToTake.length > 0) {
-                idsToTake.forEach(assetId => {
-                    const asset = assets.find(a => a.id === assetId);
-                    if (asset) {
-                        strategyUsedAssetIds.add(assetId);
-                        
-                        stockAllocationItems.push({
-                            id: Date.now() + Math.random(),
-                            assetId: asset.id,
-                            itemName: asset.name,
-                            itemTypeBrand: asset.brand,
-                            // UX: Label 'Full' untuk membedakan dengan sisa potongan
-                            conditionNotes: availability.isMeasurement ? 'Unit Utuh (Full / Segel)' : asset.condition,
-                            quantity: 1, // 1 Fisik
-                            checked: true,
-                            unit: targetUnit // Penting: Unit 'Hasbal' akan memicu 'Strict Container Logic' di Form
-                        });
-                    }
+        // 3. Cari Aset Baru yang Cocok
+        const matchingNewAssets = newProcuredAssets.filter(a => 
+            a.name.toLowerCase() === reqItem.itemName.toLowerCase() && 
+            a.brand.toLowerCase() === reqItem.itemTypeBrand.toLowerCase() &&
+            !usedAssetIds.has(a.id)
+        );
+
+        // --- DETEKSI TIPE ---
+        const sampleAsset = matchingNewAssets.length > 0 ? matchingNewAssets[0] : null;
+        const referenceAsset = sampleAsset || assets.find(a => a.name === reqItem.itemName && a.brand === reqItem.itemTypeBrand);
+        const isMeasurement = referenceAsset ? (referenceAsset.initialBalance !== undefined && referenceAsset.initialBalance > 0) : false;
+
+        let fulfilledQty = 0;
+
+        // 4. Masukkan Aset Baru (Procurement Result)
+        matchingNewAssets.forEach(asset => {
+            let itemContribution = 0;
+
+            if (isMeasurement) {
+                // LOGIKA MEASUREMENT:
+                // Kita gunakan unit fisik (Container) untuk aset baru.
+                // Misal: Kabel. Unitnya 'Hasbal' atau 'Drum' (bukan 'Hasbal (Utuh)' agar match value dropdown)
+                const balance = asset.currentBalance ?? asset.initialBalance ?? 0;
+                itemContribution = balance;
+                
+                // Coba deteksi nama unit container dari master data jika mungkin, 
+                // tapi fallback ke 'Hasbal' atau 'Drum' sederhana jika tidak ada info.
+                // Disini kita hardcode unit umum atau ambil dari requestedUnit jika cocok.
+                const containerUnit = 'Hasbal'; // Default safe, nanti akan dicocokkan di Form UI
+
+                handoverItems.push({
+                    id: genId(),
+                    assetId: asset.id,
+                    itemName: asset.name,
+                    itemTypeBrand: asset.brand,
+                    conditionNotes: 'Baru (Pengadaan)',
+                    quantity: 1, // 1 Unit Fisik
+                    unit: containerUnit, // CLEAN UNIT NAME
+                    checked: true,
+                    isLocked: true
+                });
+
+            } else {
+                // LOGIKA UNIT BIASA
+                itemContribution = 1;
+                
+                handoverItems.push({
+                    id: genId(),
+                    assetId: asset.id,
+                    itemName: asset.name,
+                    itemTypeBrand: asset.brand,
+                    conditionNotes: 'Baru (Pengadaan)',
+                    quantity: 1,
+                    unit: requestedUnit,
+                    checked: true,
+                    isLocked: true
                 });
             }
 
-            // Handle Backorder (Jika stok fisik kurang)
-            if (idsToTake.length < approvedQty) {
-                const remaining = approvedQty - idsToTake.length;
-                stockAllocationItems.push({
-                    id: Date.now() + Math.random(),
-                    assetId: '', 
-                    itemName: item.itemName,
-                    itemTypeBrand: item.itemTypeBrand,
-                    conditionNotes: 'Stok Fisik Tidak Mencukupi',
-                    quantity: remaining,
-                    checked: false, 
-                    unit: targetUnit
+            fulfilledQty += itemContribution;
+            usedAssetIds.add(asset.id);
+        });
+
+        // 5. Hitung Kekurangan (Shortfall)
+        let remainingQty = targetQty - fulfilledQty;
+        if (remainingQty < 0.0001) remainingQty = 0;
+
+        if (remainingQty > 0) {
+            // Shortfall items
+            if (isMeasurement) {
+                handoverItems.push({
+                    id: genId(),
+                    assetId: '',
+                    itemName: reqItem.itemName,
+                    itemTypeBrand: reqItem.itemTypeBrand,
+                    conditionNotes: 'Ambil dari Stok Gudang',
+                    quantity: remainingQty,
+                    unit: requestedUnit, // Meter (CLEAN NAME)
+                    checked: true,
+                    isLocked: false
                 });
+            } else {
+                for (let i = 0; i < remainingQty; i++) {
+                    handoverItems.push({
+                        id: genId() + i,
+                        assetId: '',
+                        itemName: reqItem.itemName,
+                        itemTypeBrand: reqItem.itemTypeBrand,
+                        conditionNotes: 'Ambil dari Stok Gudang',
+                        quantity: 1,
+                        unit: requestedUnit,
+                        checked: true,
+                        isLocked: false
+                    });
+                }
             }
         }
     });
-
-    // 3. Konversi Procurement Assets
-    const procurementItems: HandoverItem[] = procurementAssets.map(asset => ({
-        id: Date.now() + Math.random(),
-        assetId: asset.id,
-        itemName: asset.name,
-        itemTypeBrand: asset.brand,
-        conditionNotes: asset.condition,
-        quantity: 1,
-        checked: true,
-        unit: 'Unit'
-    }));
-
-    const finalItems = [...procurementItems, ...stockAllocationItems];
-
-    // Fallback Safety
-    if (finalItems.length === 0) {
-        const validRequestItems = request.items.filter(item => {
-            const status = request.itemStatuses?.[item.id];
-            return status?.status !== 'rejected';
-        });
-
-        validRequestItems.forEach(item => {
-             const approvedQty = request.itemStatuses?.[item.id]?.approvedQuantity ?? item.quantity;
-             finalItems.push({
-                id: Date.now() + Math.random(),
-                assetId: '', 
-                itemName: item.itemName,
-                itemTypeBrand: item.itemTypeBrand,
-                conditionNotes: 'Menunggu Alokasi Manual',
-                quantity: approvedQty,
-                checked: true,
-                unit: item.unit || 'Unit'
-            });
-        });
-    }
 
     return {
         penerima: request.requester,
         divisionId: recipientUser?.divisionId?.toString() || '',
         woRoIntNumber: request.id,
-        items: finalItems,
+        items: handoverItems,
         notes: `Serah terima aset untuk Request #${request.id}.`,
         isLocked: false, 
         targetAssetStatus: AssetStatus.IN_USE 

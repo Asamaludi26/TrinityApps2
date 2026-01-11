@@ -22,12 +22,13 @@ import { calculateAssetDepreciation } from '../../../utils/depreciation';
 import { PreviewRow } from './PreviewRow';
 import { useNotification } from '../../../providers/NotificationProvider'; 
 import { AssetLabel } from '../../../components/ui/AssetLabel'; 
-import { BsRulers, BsClockHistory, BsFileEarmarkText, BsPersonBadge, BsFilePdf, BsImage, BsFileEarmark } from 'react-icons/bs';
+import { BsRulers, BsClockHistory, BsFileEarmarkText, BsPersonBadge, BsFilePdf, BsImage, BsFileEarmark, BsLightningFill } from 'react-icons/bs';
 
 // Stores Integration
 import { useAssetStore } from '../../../stores/useAssetStore';
 import { useMasterDataStore } from '../../../stores/useMasterDataStore';
 import { useTransactionStore } from '../../../stores/useTransactionStore';
+import { useAuthStore } from '../../../stores/useAuthStore'; // Added Auth Store
 
 declare var html2canvas: any;
 
@@ -35,8 +36,9 @@ declare var html2canvas: any;
 
 const SmartContextCard: React.FC<{ 
     asset: Asset, 
-    onShowPreview: (data: PreviewData) => void 
-}> = ({ asset, onShowPreview }) => {
+    onShowPreview: (data: PreviewData) => void,
+    showSensitiveData: boolean 
+}> = ({ asset, onShowPreview, showSensitiveData }) => {
     // Access Stores for Context Lookup
     const customers = useMasterDataStore(s => s.customers);
     const users = useMasterDataStore(s => s.users);
@@ -83,7 +85,8 @@ const SmartContextCard: React.FC<{
     }
 
     // 2. Context: Internal User (Staff)
-    if (asset.status === AssetStatus.IN_USE) {
+    // RESTRICTION: Only show this detailed card to Admins.
+    if (asset.status === AssetStatus.IN_USE && showSensitiveData) {
         const user = users.find(u => u.name === asset.currentUser);
         return (
             <div className="p-4 rounded-xl bg-indigo-50 border border-indigo-200 shadow-sm animate-fade-in-up">
@@ -143,8 +146,8 @@ const SmartContextCard: React.FC<{
         );
     }
     
-    // 4. Context: In Storage (Aging info)
-    if (asset.status === AssetStatus.IN_STORAGE) {
+    // 4. Context: In Storage (Aging info) - Only for Admin
+    if (asset.status === AssetStatus.IN_STORAGE && showSensitiveData) {
         // Calculate days in storage since last status change
         const lastActivity = [...asset.activityLog].reverse().find(a => a.action.includes('Status') || a.action.includes('Dicatat'));
         const lastDate = lastActivity ? new Date(lastActivity.timestamp) : new Date(asset.registrationDate);
@@ -299,6 +302,10 @@ interface AssetPreviewProps {
 export const AssetPreview: React.FC<AssetPreviewProps> = ({ asset, canViewPrice, onShowPreview, getCustomerName }) => {
     const [activeTab, setActiveTab] = useState<'details' | 'history' | 'attachments'>('details');
     const allAssets = useAssetStore((state) => state.assets); // Access store for calculation
+    const currentUser = useAuthStore((state) => state.currentUser);
+
+    // SECURITY: Determine if user can see sensitive/operation details
+    const isOpsAdmin = currentUser?.role === 'Admin Logistik' || currentUser?.role === 'Super Admin';
 
     // Kalkulasi Stok Model yang Sama
     const stockStats = useMemo(() => {
@@ -316,6 +323,14 @@ export const AssetPreview: React.FC<AssetPreviewProps> = ({ asset, canViewPrice,
         };
     }, [allAssets, asset]);
 
+    // Calculate Measurement Progress for Staff View
+    const measurementPercent = useMemo(() => {
+        if (stockStats.isMeasurement && asset.initialBalance && asset.initialBalance > 0) {
+            return Math.round(((asset.currentBalance || 0) / asset.initialBalance) * 100);
+        }
+        return 0;
+    }, [asset, stockStats.isMeasurement]);
+
     return (
         <div>
             <div className="border-b border-gray-200">
@@ -329,31 +344,70 @@ export const AssetPreview: React.FC<AssetPreviewProps> = ({ asset, canViewPrice,
                 
                 {activeTab === 'details' && (
                     <div className="space-y-6">
-                        {/* SMART CONTEXT CARD (NEW) */}
-                        <SmartContextCard asset={asset} onShowPreview={onShowPreview} />
+                        {/* SMART CONTEXT CARD */}
+                        <SmartContextCard asset={asset} onShowPreview={onShowPreview} showSensitiveData={isOpsAdmin} />
 
-                         {/* STOCK INFO CARD */}
-                        <div className={`flex items-start gap-4 p-4 rounded-xl border ${stockStats.inStorage > 0 ? 'bg-blue-50/50 border-blue-200' : 'bg-red-50/50 border-red-200'}`}>
-                            <div className={`p-2 rounded-full ${stockStats.inStorage > 0 ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600'}`}>
-                                <ArchiveBoxIcon className="w-5 h-5" />
-                            </div>
-                            <div className="flex-1">
-                                <h4 className={`text-sm font-bold ${stockStats.inStorage > 0 ? 'text-blue-800' : 'text-red-800'}`}>
-                                    Statistik Stok Gudang
-                                </h4>
-                                <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-6 mt-1">
-                                    <div className="text-xs text-gray-600">
-                                        Unit Sejenis Tersedia: <strong className="text-gray-900">{stockStats.inStorage}</strong> / {stockStats.total}
-                                    </div>
-                                    {stockStats.isMeasurement && (
-                                        <div className="flex items-center gap-1.5 text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
-                                            <BsRulers className="w-3 h-3"/>
-                                            <span>Sisa Isi Unit Ini: <strong>{asset.currentBalance?.toLocaleString('id-ID')}</strong> (Awal: {asset.initialBalance?.toLocaleString('id-ID')})</span>
+                         {/* STOCK INFO CARD - ONLY FOR OPS ADMIN */}
+                        {isOpsAdmin && (
+                            <div className={`flex items-start gap-4 p-4 rounded-xl border ${stockStats.inStorage > 0 ? 'bg-blue-50/50 border-blue-200' : 'bg-red-50/50 border-red-200'}`}>
+                                <div className={`p-2 rounded-full ${stockStats.inStorage > 0 ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600'}`}>
+                                    <ArchiveBoxIcon className="w-5 h-5" />
+                                </div>
+                                <div className="flex-1">
+                                    <h4 className={`text-sm font-bold ${stockStats.inStorage > 0 ? 'text-blue-800' : 'text-red-800'}`}>
+                                        Statistik Stok Gudang
+                                    </h4>
+                                    <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-6 mt-1">
+                                        <div className="text-xs text-gray-600">
+                                            Unit Sejenis Tersedia: <strong className="text-gray-900">{stockStats.inStorage}</strong> / {stockStats.total}
                                         </div>
-                                    )}
+                                        {stockStats.isMeasurement && (
+                                            <div className="flex items-center gap-1.5 text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
+                                                <BsRulers className="w-3 h-3"/>
+                                                <span>Sisa Isi Unit Ini: <strong>{asset.currentBalance?.toLocaleString('id-ID')}</strong> (Awal: {asset.initialBalance?.toLocaleString('id-ID')})</span>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        )}
+
+                        {/* MEASUREMENT INFO CARD - FOR STAFF (When Admin View is hidden) */}
+                        {!isOpsAdmin && stockStats.isMeasurement && (
+                            <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+                                <div className="flex items-center gap-2 mb-3">
+                                    <div className="p-1.5 bg-indigo-100 text-indigo-600 rounded">
+                                        <BsRulers className="w-4 h-4"/>
+                                    </div>
+                                    <h4 className="text-sm font-bold text-gray-800">Status Fisik Unit Ini</h4>
+                                </div>
+                                
+                                <div className="space-y-3">
+                                    <div className="flex justify-between items-end text-sm">
+                                        <span className="text-gray-500">Sisa Pemakaian:</span>
+                                        <div className="text-right">
+                                            <span className="font-bold text-gray-900 text-lg">{asset.currentBalance?.toLocaleString('id-ID')}</span>
+                                            <span className="text-gray-500 text-xs ml-1">/ {asset.initialBalance?.toLocaleString('id-ID')}</span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden border border-gray-200">
+                                        <div 
+                                            className={`h-full rounded-full transition-all duration-500 ${
+                                                measurementPercent < 20 ? 'bg-red-500' : 
+                                                measurementPercent < 50 ? 'bg-amber-400' : 
+                                                'bg-green-500'
+                                            }`}
+                                            style={{ width: `${measurementPercent}%` }}
+                                        ></div>
+                                    </div>
+                                    
+                                    <p className="text-xs text-gray-400 text-center italic">
+                                        {measurementPercent < 20 ? 'Unit ini hampir habis. Harap lapor jika perlu restock.' : 'Kondisi isi masih mencukupi.'}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
 
                         <div>
                             <h3 className="text-base font-semibold text-gray-800 border-b border-gray-200 pb-2 mb-4">Informasi Dasar</h3>
@@ -397,17 +451,22 @@ export const AssetPreview: React.FC<AssetPreviewProps> = ({ asset, canViewPrice,
                                 <PreviewRow label="Kondisi" value={asset.condition} />
                                 <PreviewRow label="Lokasi" value={asset.location} />
                                 <PreviewRow label="Detail Lokasi" value={asset.locationDetail} />
-                                <PreviewRow label="Pengguna Saat Ini">
-                                    {asset.currentUser?.startsWith('TMI-') ? (
-                                        <ClickableLink onClick={() => onShowPreview({type: 'customer', id: asset.currentUser!})}>
-                                            {getCustomerName(asset.currentUser)}
-                                        </ClickableLink>
-                                    ) : asset.currentUser ? (
-                                        <ClickableLink onClick={() => onShowPreview({type: 'user', id: asset.currentUser!})}>
-                                            {asset.currentUser}
-                                        </ClickableLink>
-                                    ) : '-'}
-                                </PreviewRow>
+                                
+                                {/* HIDE USER for NON-ADMINS unless it's external customer */}
+                                {(isOpsAdmin || asset.currentUser?.startsWith('TMI-')) && (
+                                    <PreviewRow label="Pengguna Saat Ini">
+                                        {asset.currentUser?.startsWith('TMI-') ? (
+                                            <ClickableLink onClick={() => onShowPreview({type: 'customer', id: asset.currentUser!})}>
+                                                {getCustomerName(asset.currentUser)}
+                                            </ClickableLink>
+                                        ) : asset.currentUser ? (
+                                            <ClickableLink onClick={() => onShowPreview({type: 'user', id: asset.currentUser!})}>
+                                                {asset.currentUser}
+                                            </ClickableLink>
+                                        ) : '-'}
+                                    </PreviewRow>
+                                )}
+
                                 <PreviewRow label="Dicatat oleh" value={asset.recordedBy} fullWidth />
                                 <PreviewRow label="Catatan" value={asset.notes} fullWidth />
                             </dl>

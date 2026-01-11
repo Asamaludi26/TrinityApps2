@@ -225,6 +225,20 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
         }
     }, [myAssets, currentUser.role]);
 
+    // Helper to find unit label for asset card
+    const getUnitLabel = (asset: Asset) => {
+        // Quick lookup logic mirroring AssetStore logic
+        const category = assetCategories.find(c => c.name === asset.category);
+        const type = category?.types.find(t => t.name === asset.type);
+        const model = type?.standardItems?.find(m => m.name === asset.name && m.brand === asset.brand);
+
+        if (model && model.bulkType === 'measurement') {
+            return model.baseUnitOfMeasure || 'Meter';
+        }
+        return model?.unitOfMeasure || type?.unitOfMeasure || 'Unit';
+    };
+
+
     // --- ADMIN/MANAGER-SPECIFIC LOGIC ---
     const aggregatedStock = useMemo<StockItem[]>(() => {
         if (currentUser.role === 'Staff') return [];
@@ -543,6 +557,7 @@ const StockOverviewPage: React.FC<StockOverviewPageProps> = ({ currentUser, setA
                                         isLoaned={isLoaned}
                                         returnDate={loanDetails?.returnDate || null}
                                         onReturn={isLoaned && loanDetails ? () => setActivePage('return-form', { loanId: loanDetails.loanId, assetId: asset.id }) : undefined}
+                                        unitLabel={getUnitLabel(asset)}
                                     />
                                 );
                             })}

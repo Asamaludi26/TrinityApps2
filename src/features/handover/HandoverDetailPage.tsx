@@ -1,11 +1,12 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Handover, User, Division, PreviewData } from '../../types';
 import { DetailPageLayout } from '../../components/layout/DetailPageLayout';
 import { Letterhead } from '../../components/ui/Letterhead';
 import { SignatureStamp } from '../../components/ui/SignatureStamp';
 import { ClickableLink } from '../../components/ui/ClickableLink';
 import { HandoverStatusSidebar } from './components/HandoverStatusSidebar'; 
+import { BsBoxSeam, BsRulers } from 'react-icons/bs';
 
 interface HandoverDetailPageProps {
     handover: Handover;
@@ -61,35 +62,56 @@ const HandoverDetailPage: React.FC<HandoverDetailPageProps> = (props) => {
                 
                 <section>
                     <h4 className="font-semibold text-gray-800 border-b pb-1 mb-2">Rincian Barang</h4>
-                    <div className="overflow-x-auto">
+                    <div className="overflow-x-auto border rounded-lg">
                         <table className="w-full text-left text-sm">
                             <thead className="bg-gray-100 text-xs uppercase text-gray-700">
                                 <tr>
-                                    <th className="p-2 w-10">No.</th>
-                                    <th className="p-2">Nama Barang</th>
-                                    <th className="p-2">ID Aset</th>
-                                    <th className="p-2">Kondisi</th>
-                                    <th className="p-2 text-center">Jumlah</th>
+                                    <th className="p-3 w-10 text-center">No.</th>
+                                    <th className="p-3">Nama Barang</th>
+                                    <th className="p-3">ID Aset</th>
+                                    <th className="p-3">Kondisi</th>
+                                    <th className="p-3 text-center w-40">Jumlah</th>
                                 </tr>
                             </thead>
-                            <tbody>
-                                {handover.items.map((item, index) => (
-                                    <tr key={item.id} className="border-b">
-                                        <td className="p-2 text-center text-gray-800">{index + 1}.</td>
-                                        <td className="p-2 font-semibold text-gray-800">{item.itemName}</td>
-                                        <td className="p-2 text-gray-600 font-mono">
-                                            {item.assetId ? (
-                                                <ClickableLink onClick={() => onShowPreview({type: 'asset', id: item.assetId!})}>
-                                                    {item.assetId}
-                                                </ClickableLink>
-                                            ) : '-'}
-                                        </td>
-                                        <td className="p-2 text-gray-600">{item.conditionNotes}</td>
-                                        <td className="p-2 text-center font-medium text-gray-800">
-                                            {item.quantity} {item.unit || 'unit'}
-                                        </td>
-                                    </tr>
-                                ))}
+                            <tbody className="divide-y divide-gray-100">
+                                {handover.items.map((item, index) => {
+                                    // Logika Visualisasi Tipe Aset
+                                    const isPhysicalContainer = ['Hasbal', 'Drum', 'Roll', 'Box', 'Pack'].includes(item.unit || '');
+                                    const isMeasurement = ['Meter', 'Liter', 'Kg'].includes(item.unit || '');
+
+                                    return (
+                                        <tr key={item.id} className="hover:bg-gray-50">
+                                            <td className="p-3 text-center text-gray-500">{index + 1}.</td>
+                                            <td className="p-3">
+                                                <div className="font-bold text-gray-800">{item.itemName}</div>
+                                                <div className="text-xs text-gray-500">{item.itemTypeBrand}</div>
+                                            </td>
+                                            <td className="p-3 text-gray-600 font-mono text-xs">
+                                                {item.assetId ? (
+                                                    <ClickableLink onClick={() => onShowPreview({type: 'asset', id: item.assetId!})}>
+                                                        {item.assetId}
+                                                    </ClickableLink>
+                                                ) : <span className="italic text-gray-400">-</span>}
+                                            </td>
+                                            <td className="p-3 text-gray-700">{item.conditionNotes}</td>
+                                            <td className="p-3 text-center">
+                                                {isPhysicalContainer ? (
+                                                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-bold shadow-sm">
+                                                        <BsBoxSeam className="w-3 h-3" /> 
+                                                        <span>{item.quantity} {item.unit}</span>
+                                                    </div>
+                                                ) : isMeasurement ? (
+                                                    <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-orange-50 text-orange-700 border border-orange-200 text-xs font-bold shadow-sm">
+                                                        <BsRulers className="w-3 h-3" />
+                                                        <span>{item.quantity.toLocaleString('id-ID')} {item.unit}</span>
+                                                    </div>
+                                                ) : (
+                                                    <span className="font-semibold text-gray-900">{item.quantity} {item.unit || 'Unit'}</span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>

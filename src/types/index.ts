@@ -438,7 +438,8 @@ export interface HandoverItem {
     conditionNotes: string;
     quantity: number;
     checked: boolean;
-    unit?: string; // New property to store the unit (Hasbal, Meter, etc)
+    unit?: string; 
+    isLocked?: boolean; // New Flag: If true, user cannot change assetId in UI
 }
 
 export interface Handover {
@@ -519,6 +520,7 @@ export interface MaintenanceMaterial {
 export interface MaintenanceAsset {
     assetId: string;
     assetName: string;
+    // ...
 }
 
 export interface Maintenance {
@@ -540,7 +542,7 @@ export interface Maintenance {
     status: ItemStatus;
     completedBy?: string;
     completionDate?: string;
-    notes?: string; // NEW: Added Notes field
+    notes?: string; 
 }
 
 export type NotificationType = 'info' | 'success' | 'warning' | 'error' | 'SYSTEM' | string;

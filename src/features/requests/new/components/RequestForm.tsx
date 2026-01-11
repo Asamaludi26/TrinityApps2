@@ -41,7 +41,7 @@ import DatePicker from '../../../../components/ui/DatePicker';
 import { useAssetStore } from '../../../../stores/useAssetStore';
 import { RequestItemFormState } from '../utils/requestHelpers'; // Import Type
 
-const DRAFT_VERSION = "1.0.5"; // Bump version
+const DRAFT_VERSION = "1.0.6"; // Bump version
 const MAX_ITEMS = 15;
 
 interface RequestFormProps {
@@ -123,7 +123,8 @@ export const RequestForm: React.FC<RequestFormProps> = ({
         if (savedDraft) {
           try {
             const parsed = JSON.parse(savedDraft);
-            if (parsed.version === DRAFT_VERSION) {
+            // Allow slightly older drafts if structure is compatible
+            if (parsed.version && parsed.items) {
                 setItems(parsed.items);
                 setOrderType(parsed.orderType);
                 setJustification(parsed.justification);
@@ -450,8 +451,18 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                           
                           const selectedModel = availableModels.find(m => m.name === item.itemName && m.brand === item.itemTypeBrand);
                           const isMeasurement = selectedModel?.bulkType === 'measurement';
+                          const isContainerMode = item.unit === selectedModel?.unitOfMeasure;
                           
-                          // FIX: AVAILABLE UNITS CALCULATION DIRECTLY
+                          // --- REFACTOR START: Dynamic Step & Min Calculation ---
+                          // Logic: 
+                          // 1. If Measurement (e.g. Meter) AND Not Container (e.g. Hasbal), we allow decimals.
+                          // 2. If Unit/Count OR Container Mode, we force integers.
+                          
+                          const allowDecimals = isMeasurement && !isContainerMode;
+                          const inputStep = allowDecimals ? "0.1" : "1";
+                          const inputMin = allowDecimals ? "0.1" : "1";
+                          // --- REFACTOR END ---
+                          
                           let availableUnitOptions = STANDARD_UNIT_OPTIONS.map(u => ({ value: u, label: u }));
                           
                           if (isMeasurement && selectedModel) {
@@ -462,8 +473,6 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                           } else if (currentType?.unitOfMeasure) {
                               availableUnitOptions = [{ value: currentType.unitOfMeasure, label: currentType.unitOfMeasure }];
                           }
-
-                          const isContainerMode = item.unit === selectedModel?.unitOfMeasure;
 
                           return (
                               <div key={item.id} className="group relative bg-white border border-slate-200 rounded-lg shadow-sm hover:border-tm-primary/40 hover:shadow-md transition-all p-4">
@@ -526,8 +535,8 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                                                         type="number" 
                                                         value={item.quantity} 
                                                         onChange={e => updateItemState(item.id, { quantity: parseFloat(e.target.value) || 0 })} 
-                                                        min="0.1" 
-                                                        step={isMeasurement ? "0.1" : "1"} 
+                                                        min={inputMin} 
+                                                        step={inputStep} 
                                                         className="w-1/2 pl-3 pr-1 py-2 bg-white border border-slate-300 rounded-l-md text-sm font-bold text-center text-slate-800 focus:ring-1 focus:ring-tm-primary focus:border-tm-primary outline-none z-10" 
                                                     />
                                                     <select
