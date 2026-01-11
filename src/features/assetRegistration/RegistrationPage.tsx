@@ -1,5 +1,4 @@
 
-// ... existing imports
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Asset, AssetStatus, Request, User, PreviewData, AssetCategory, Page, RequestItem, ParsedScanResult, AssetType, AssetCondition } from '../../types';
 import { useNotification } from '../../providers/NotificationProvider';
@@ -354,9 +353,15 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
                         referenceId: data.relatedRequestId || undefined
                     }],
                     woRoIntNumber: data.relatedRequestId,
-                    // --- FIX: Include Measurement Balances
+                    // --- FIX: Include Measurement Balances & Count Quantities
                     initialBalance: item.initialBalance,
                     currentBalance: item.currentBalance,
+                    
+                    // --- NEW: Handle Bulk Count (Material) Logic at Add Asset Level
+                    // Jika data.quantity digunakan untuk store quantity pada asset bulk/count
+                    // addAsset akan menangani ini (via recordMovement / update).
+                    // Disini kita passing data mentah yang diperlukan store.
+                    ...(data.bulkItems.length === 1 && data.quantity ? { quantity: Number(data.quantity) } : {}) 
                 };
             });
 
@@ -365,14 +370,31 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
             }
 
             if (data.relatedRequestId && prefillData?.itemToRegister) {
-                await updateRequestRegistration(data.relatedRequestId, prefillData.itemToRegister.id, newAssets.length);
+                // FIX: Kalkulasi jumlah yang didaftarkan ke Request
+                // Jika tipe adalah Bulk Count (misal Connector), newAssets.length hanya 1 (dummy asset).
+                // Kita harus melaporkan 'data.quantity' yang sebenarnya.
+                
+                let registeredCount = newAssets.length;
+                
+                // Deteksi jika ini adalah Bulk Count
+                const categoryObj = categories.find(c => c.name === data.category);
+                const typeObj = categoryObj?.types.find(t => t.name === data.type);
+                // Check if Bulk AND Not Measurement (means Count)
+                const isBulkCount = typeObj?.trackingMethod === 'bulk' && 
+                                    typeObj.standardItems?.find(m => m.name === data.assetName)?.bulkType !== 'measurement';
+
+                if (isBulkCount) {
+                    registeredCount = Number(data.quantity);
+                }
+
+                await updateRequestRegistration(data.relatedRequestId, prefillData.itemToRegister.id, registeredCount);
                 
                 // REDIRECT FIX: Go back to Request Detail page after registration
                 setActivePage('request', { openDetailForId: data.relatedRequestId });
                 return; // Stop here, don't execute the rest of the function (setView list)
             }
 
-            addNotification(`${newAssets.length} aset berhasil didaftarkan.`, 'success');
+            addNotification(`${newAssets.length > 1 ? newAssets.length : (data.quantity || 1)} aset berhasil didaftarkan.`, 'success');
         }
         
         setView('list');

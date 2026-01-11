@@ -117,8 +117,16 @@ export const useRegistrationForm = ({
             
             const isBulkTracking = foundType?.trackingMethod === 'bulk';
             
+            // Fix: Detect if it is 'count' based (e.g. connector) or 'measurement' based (e.g. cable)
+            const modelData = foundType?.standardItems?.find(m => m.name === itemToRegister.itemName && m.brand === itemToRegister.itemTypeBrand);
+            const isMeasurement = isBulkTracking && modelData?.bulkType === 'measurement';
+            const isCount = isBulkTracking && !isMeasurement;
+
+            // If Count type: init empty bulk items (will default to 1 dummy later), just prep qty
+            // If Individual: init N items
+            // If Measurement: init empty (wait for generator)
             const initialBulkItems = isBulkTracking 
-                ? [] 
+                ? (isCount ? [{ id: generateUUID(), serialNumber: '', macAddress: '' }] : [])
                 : Array.from({ length: quantityToRegister }, () => ({ id: generateUUID(), serialNumber: '', macAddress: '' }));
 
             const details = request.purchaseDetails?.[itemToRegister.id];
@@ -324,6 +332,8 @@ export const useRegistrationForm = ({
                       return;
                  }
              } else {
+                 // For Count tracking (e.g. connectors), we ensure 1 dummy item exists.
+                 // This ensures newAssets.length >= 1 in RegistrationPage.
                  if (finalBulkItems.length === 0) {
                      finalBulkItems = [{ id: generateUUID(), serialNumber: '', macAddress: '' }];
                  }
