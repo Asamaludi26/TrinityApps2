@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Asset, AssetCondition, Request, RequestItem, User, AssetCategory, AssetType, ParsedScanResult, StandardItem } from '../../../types';
+import { Asset, AssetCondition, Request, RequestItem, User, AssetCategory, AssetType, ParsedScanResult, StandardItem, AssetStatus } from '../../../types';
 import { RegistrationFormData } from '../types';
 import { useNotification } from '../../../providers/NotificationProvider';
 import { generateUUID } from '../../../utils/uuid';
@@ -80,8 +80,8 @@ export const useRegistrationForm = ({
             return assets.filter(a => 
                 a.name === formData.assetName && 
                 a.brand === formData.brand && 
-                a.status === 'Di Gudang'
-            ).reduce((acc, curr) => acc + (curr.inStorage || 1), 0);
+                a.status === AssetStatus.IN_STORAGE
+            ).reduce((acc, curr) => acc + (curr.currentBalance || 1), 0);
         }
         return 0;
     }, [assets, selectedType, selectedModel, formData.assetName, formData.brand]);

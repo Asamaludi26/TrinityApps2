@@ -188,7 +188,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     await api.updateData('app_maintenances', updated);
     set({ maintenances: updated });
     
-    if (data.status === 'Selesai' || data.status === 'Completed') {
+    if (data.status === ItemStatus.COMPLETED) {
          notifyAdmins('REPAIR_COMPLETED', id, 'telah menyelesaikan tiket maintenance');
     }
   },

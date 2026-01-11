@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { User, Installation, InstallationAsset } from '../../../../types';
+import { User, Installation, InstallationAsset, Asset } from '../../../../types';
 import { useNotification } from '../../../../providers/NotificationProvider';
 import { CustomSelect } from '../../../../components/ui/CustomSelect';
 import DatePicker from '../../../../components/ui/DatePicker';
@@ -201,11 +201,11 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
         });
     };
 
-    const handleAllocationSelect = (assetId: string) => {
+    const handleAllocationSelect = (asset: Asset) => {
         if (allocationModal.itemIndex !== null) {
             setMaterialsUsed(prev => prev.map((item, idx) => {
                 if (idx === allocationModal.itemIndex) {
-                    return { ...item, materialAssetId: assetId };
+                    return { ...item, materialAssetId: asset.id };
                 }
                 return item;
             }));
@@ -443,7 +443,12 @@ export const InstallationForm: React.FC<InstallationFormProps> = ({ currentUser,
                     brand={allocationModal.brand}
                     assets={assets}
                     onSelect={handleAllocationSelect}
-                    currentSelectedId={allocationModal.itemIndex !== null ? materialsUsed[allocationModal.itemIndex]?.materialAssetId : undefined}
+                    currentSelectedId={
+                        allocationModal.itemIndex !== null 
+                        ? materialsUsed[allocationModal.itemIndex]?.materialAssetId 
+                        : undefined
+                    }
+                    currentUser={currentUser} // Pass currentUser here
                 />
             )}
         </>

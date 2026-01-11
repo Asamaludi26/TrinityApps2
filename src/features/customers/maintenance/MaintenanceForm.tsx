@@ -274,14 +274,39 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
         });
     };
 
-    const handleAllocationSelect = (assetId: string) => {
+    // UPDATED: Handle Full Asset Object selection for validation
+    const handleAllocationSelect = (asset: Asset) => {
         if (allocationModal.itemIndex !== null) {
             setAdditionalMaterials(prev => prev.map((item, idx) => {
                 if (idx === allocationModal.itemIndex) {
-                    return { ...item, materialAssetId: assetId };
+                    
+                    let newQuantity = item.quantity;
+                    const isMeasurement = asset.initialBalance !== undefined && asset.currentBalance !== undefined;
+                    
+                    if (isMeasurement) {
+                        // Jika tipe measurement (Kabel/Pipa), cek apakah quantity yg diminta > sisa stok
+                        const currentBalance = asset.currentBalance || 0;
+                        if (Number(item.quantity) > currentBalance) {
+                            newQuantity = currentBalance;
+                            addNotification(`Kuantitas disesuaikan dengan sisa stok aset (${newQuantity}).`, 'info');
+                        }
+                    } else {
+                        // Jika tipe Unit (SN Unik), quantity HARUS 1
+                        newQuantity = 1;
+                        if (item.quantity !== 1) {
+                            addNotification("Aset individual terpilih, kuantitas diatur ke 1.", 'info');
+                        }
+                    }
+
+                    return { 
+                        ...item, 
+                        materialAssetId: asset.id,
+                        quantity: newQuantity
+                    };
                 }
                 return item;
             }));
+            addNotification("Sumber stok berhasil dipilih.", "success");
         }
     };
     
@@ -631,22 +656,14 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                     </div>
                 </section>
 
-                <section className="pt-8 border-t">
-                    <div className="grid grid-cols-2 text-center text-sm">
-                        <div><p className="font-semibold text-gray-600">Teknisi,</p><div className="flex items-center justify-center mt-2 h-28"><SignatureStamp signerName={technician} signatureDate={maintenanceDate?.toISOString() || ''} /></div><p className="pt-1 mt-2 border-t border-gray-400">({technician})</p></div>
-                         <div><p className="font-semibold text-gray-600">Pelanggan,</p><div className="h-28 mt-2"></div><p className="pt-1 mt-2 border-t border-gray-400">(.........................)</p></div>
-                    </div>
-                </section>
-
                 <div ref={footerRef} className="flex justify-end pt-4 mt-4 border-t border-gray-200">
-                   <ActionButtons formId={formId} />
+                    <ActionButtons formId={formId} />
                 </div>
             </form>
             <FloatingActionBar isVisible={!isFooterVisible}>
                 <ActionButtons formId={formId} />
             </FloatingActionBar>
             
-            {/* Allocation Modal */}
             {allocationModal.isOpen && (
                 <MaterialAllocationModal 
                     isOpen={allocationModal.isOpen}
@@ -656,6 +673,8 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                     assets={assets}
                     onSelect={handleAllocationSelect}
                     currentSelectedId={allocationModal.itemIndex !== null ? additionalMaterials[allocationModal.itemIndex]?.materialAssetId : undefined}
+                    currentUser={currentUser} 
+                    ownerName={technician} // PASSING TECHNICIAN NAME
                 />
             )}
         </>

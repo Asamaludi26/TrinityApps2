@@ -142,9 +142,68 @@ const MaintenanceFormPage: React.FC<MaintenanceManagementPageProps> = (props) =>
         };
         
         try {
+             // 0. Validate & Consume Materials FIRST (Critical Order)
+             let materialsToInstall: InstalledMaterial[] = [];
+             
+             if (maintenanceData.materialsUsed && maintenanceData.materialsUsed.length > 0) {
+                 materialsToInstall = maintenanceData.materialsUsed.map((material) => {
+                    let unit = "pcs";
+                    let convertedQuantity = material.quantity;
+                    let materialFound = false;
+
+                    for (const cat of assetCategories) {
+                        if (materialFound) break;
+                        for (const type of cat.types) {
+                            const matchedItem = type.standardItems?.find((item) => item.name === material.itemName && item.brand === material.brand);
+
+                            if (type.trackingMethod === "bulk" && matchedItem) {
+                                unit = matchedItem.baseUnitOfMeasure || type.unitOfMeasure || "pcs";
+                                
+                                const isInputContainer = material.unit === matchedItem.unitOfMeasure; // e.g. Hasbal === Hasbal?
+                                
+                                if (matchedItem.quantityPerUnit && isInputContainer) {
+                                    convertedQuantity = material.quantity * matchedItem.quantityPerUnit;
+                                } else {
+                                    convertedQuantity = material.quantity;
+                                }
+                                
+                                materialFound = true;
+                                break;
+                            }
+                        }
+                    }
+                    return {
+                        itemName: material.itemName,
+                        brand: material.brand,
+                        quantity: convertedQuantity,
+                        unit: unit,
+                        installationDate: newMaintenance.maintenanceDate,
+                        materialAssetId: material.materialAssetId 
+                    };
+                });
+
+                // EXECUTE CONSUMPTION
+                const result = await consumeMaterials(
+                     materialsToInstall,
+                     { 
+                         customerId: maintenanceData.customerId, 
+                         location: `Terpasang di: ${maintenanceData.customerName}`,
+                         technicianName: maintenanceData.technician
+                     }
+                );
+
+                // ABORT IF FAILED
+                if (!result.success) {
+                    result.errors.forEach(err => addNotification(err, 'error'));
+                    setIsLoading(false);
+                    return; // STOP EXECUTION
+                }
+            }
+
+            // 1. Save Maintenance Record
             await addMaintenance(newMaintenance);
 
-            // 1. Asset Replacement Logic (Aset Tetap)
+            // 2. Asset Replacement Logic (Aset Tetap)
             if (maintenanceData.replacements && maintenanceData.replacements.length > 0) {
                 for (const rep of maintenanceData.replacements) {
                      await updateAsset(rep.oldAssetId, {
@@ -162,54 +221,8 @@ const MaintenanceFormPage: React.FC<MaintenanceManagementPageProps> = (props) =>
                 }
             }
 
-            // 2. Prepare Materials to Install (Conversion Logic)
-             const materialsToInstall: InstalledMaterial[] = (newMaintenance.materialsUsed || []).map((material) => {
-                let unit = "pcs";
-                let convertedQuantity = material.quantity;
-                let materialFound = false;
-
-                for (const cat of assetCategories) {
-                    if (materialFound) break;
-                    for (const type of cat.types) {
-                        const matchedItem = type.standardItems?.find((item) => item.name === material.itemName && item.brand === material.brand);
-
-                        if (type.trackingMethod === "bulk" && matchedItem) {
-                            unit = matchedItem.baseUnitOfMeasure || type.unitOfMeasure || "pcs";
-                            if (matchedItem.quantityPerUnit) {
-                                convertedQuantity = material.quantity * matchedItem.quantityPerUnit;
-                            }
-                            materialFound = true;
-                            break;
-                        }
-                    }
-                }
-                return {
-                    itemName: material.itemName,
-                    brand: material.brand,
-                    quantity: convertedQuantity,
-                    unit: unit,
-                    installationDate: newMaintenance.maintenanceDate,
-                    // IMPORTANT: Pass the specific source ID if selected
-                    materialAssetId: material.materialAssetId 
-                };
-            });
-
-            // 3. Update Stock & Customer Data
+            // 3. Update Customer Record with Materials
             if (materialsToInstall.length > 0) {
-                // a. Consume Stock via Store Action
-                const result = await consumeMaterials(
-                     materialsToInstall,
-                     { 
-                         customerId: maintenanceData.customerId, 
-                         location: `Terpasang di: ${maintenanceData.customerName}` 
-                     }
-                );
-
-                if (result.warnings.length > 0) {
-                    result.warnings.forEach(w => addNotification(w, 'warning'));
-                }
-
-                // b. Update Customer Record
                 const customer = customers.find(c => c.id === newMaintenance.customerId);
                 if (customer) {
                     const existingMaterials = customer.installedMaterials || [];
@@ -217,24 +230,17 @@ const MaintenanceFormPage: React.FC<MaintenanceManagementPageProps> = (props) =>
 
                     materialsToInstall.forEach((newMat) => {
                         const existingMatIndex = updatedMaterials.findIndex(
-                          (em) => em.itemName === newMat.itemName // Match by name only to capture brand changes/upgrades
+                          (em) => em.itemName === newMat.itemName 
                         );
                         if (existingMatIndex > -1) {
-                            // LOGIC MAINTENANCE: REPLACE / REFRESH
-                            // Berbeda dengan Instalasi baru (Accumulate), Maintenance biasanya mengganti part rusak.
-                            // Kita update tanggal, update brand (jika ganti merk), dan ambil quantity terbesar.
-                            // Contoh: Ganti kabel putus 150m dengan kabel baru 150m -> Tetap 150m (bukan 300m).
                             updatedMaterials[existingMatIndex] = {
                                 ...updatedMaterials[existingMatIndex],
-                                brand: newMat.brand, // Update brand jika ada penggantian merk
-                                installationDate: newMat.installationDate, // Update tanggal maintenance terakhir
+                                brand: newMat.brand, 
+                                installationDate: newMat.installationDate, 
                                 unit: newMat.unit,
-                                // Gunakan quantity terbesar untuk menjaga data aset utama (misal kabel utama)
-                                // Jika hanya splicing (pemakaian sedikit), quantity lama (panjang kabel) tetap dipertahankan.
                                 quantity: Math.max(updatedMaterials[existingMatIndex].quantity, newMat.quantity),
                           };
                         } else {
-                          // Item baru (misal sebelumnya tidak ada pelindung kabel)
                           updatedMaterials.push(newMat);
                         }
                     });
@@ -398,11 +404,7 @@ const MaintenanceFormPage: React.FC<MaintenanceManagementPageProps> = (props) =>
             
             <div className="overflow-hidden bg-white border border-gray-200/80 rounded-xl shadow-md">
                 <div className="overflow-x-auto custom-scrollbar">
-                    {paginatedMaintenances.length > 0 ? (
-                        <MaintenanceTable maintenances={paginatedMaintenances} onDetailClick={(m) => { setSelectedMaintenance(m); setView('detail'); }} sortConfig={sortConfig} requestSort={requestSort} />
-                    ) : (
-                        <div className="py-12 text-center text-gray-500"><InboxIcon className="w-12 h-12 mx-auto text-gray-300" /><p className="mt-2 font-semibold">Tidak ada data maintenance.</p></div>
-                    )}
+                    <MaintenanceTable maintenances={paginatedMaintenances} onDetailClick={(m) => { setSelectedMaintenance(m); setView('detail'); }} sortConfig={sortConfig} requestSort={requestSort} />
                 </div>
                 {sortedMaintenances.length > 0 && <PaginationControls currentPage={currentPage} totalPages={totalPages} totalItems={sortedMaintenances.length} itemsPerPage={itemsPerPage} onPageChange={setCurrentPage} onItemsPerPageChange={setItemsPerPage} startIndex={(currentPage - 1) * itemsPerPage} endIndex={(currentPage - 1) * itemsPerPage + paginatedMaintenances.length} />}
             </div>

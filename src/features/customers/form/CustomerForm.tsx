@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Customer, CustomerStatus, Asset, InstalledMaterial, AssetCategory } from '../../../types';
+import { Customer, CustomerStatus, Asset, InstalledMaterial, AssetCategory, User } from '../../../types'; // Import User
 import DatePicker from '../../../components/ui/DatePicker';
 import { useNotification } from '../../../providers/NotificationProvider';
 import FloatingActionBar from '../../../components/ui/FloatingActionBar';
@@ -15,10 +15,12 @@ import { PlusIcon } from '../../../components/icons/PlusIcon';
 import { TrashIcon } from '../../../components/icons/TrashIcon';
 import { ArchiveBoxIcon } from '../../../components/icons/ArchiveBoxIcon'; 
 import { useCustomerAssetLogic } from '../hooks/useCustomerAssetLogic';
-import { generateUUID } from '../../../utils/uuid'; // IMPORTED UUID
+import { generateUUID } from '../../../utils/uuid'; 
 
 // Components
 import { MaterialAllocationModal } from '../../../components/ui/MaterialAllocationModal'; 
+// Import Stores needed for current User in wrapper (CustomerForm is wrapped in CustomerFormPage usually)
+import { useAuthStore } from '../../../stores/useAuthStore'; // Auth Store needed inside form if not passed
 
 interface CustomerFormProps {
     customer: Customer | null;
@@ -45,12 +47,13 @@ const FormSection: React.FC<{ title: string; icon: React.ReactNode; children: Re
 );
 
 const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, onCancel }) => {
-    // Hooks Logic - Terintegrasi dengan Asset Store & Categories
+    // Hooks Logic
     const { installableAssets, materialOptions } = useCustomerAssetLogic();
+    const currentUser = useAuthStore(state => state.currentUser)!; // Access current user
 
     type MaterialFormItem = {
-        tempId: string; // Changed from number to string for UUID
-        modelKey: string; // Format: "itemName|brand"
+        tempId: string; 
+        modelKey: string; 
         quantity: number | '';
         unit: string;
         materialAssetId?: string; 
@@ -113,7 +116,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
             setAssignedAssetIds(currentAssets);
 
             setMaterials((customer.installedMaterials || []).map((m) => ({
-                tempId: generateUUID(), // Always generate fresh UUIDs for edit session
+                tempId: generateUUID(), 
                 modelKey: `${m.itemName}|${m.brand}`,
                 quantity: m.quantity,
                 unit: m.unit,
@@ -134,7 +137,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
                     const match = materialOptions.find(opt => opt.label.toLowerCase().includes(keyword.toLowerCase()));
                     if (match) {
                         defaultMaterials.push({
-                            tempId: generateUUID(), // Fix: Use UUID
+                            tempId: generateUUID(), 
                             modelKey: match.value,
                             quantity: 0, 
                             unit: match.unit || 'Pcs',
@@ -254,6 +257,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
                 if (field === 'modelKey') {
                     const model = materialOptions.find(opt => opt.value === value);
                     updatedItem.unit = model?.unit || 'Pcs';
+                    // CRITICAL: Reset specific material asset ID if model changes to prevent dangling reference
                     updatedItem.materialAssetId = undefined;
                 }
                 return updatedItem;
@@ -273,11 +277,11 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
         });
     };
 
-    const handleAllocationSelect = (assetId: string) => {
+    const handleAllocationSelect = (asset: Asset) => {
         if (allocationModal.itemIndex !== null) {
             setMaterials(prev => prev.map((item, idx) => {
                 if (idx === allocationModal.itemIndex) {
-                    return { ...item, materialAssetId: assetId };
+                    return { ...item, materialAssetId: asset.id };
                 }
                 return item;
             }));
@@ -549,6 +553,7 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
                         ? materials[allocationModal.itemIndex]?.materialAssetId 
                         : undefined
                     }
+                    currentUser={currentUser} // PASS CURRENT USER
                 />
             )}
         </>

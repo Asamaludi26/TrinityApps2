@@ -51,6 +51,9 @@ const InstallationFormPage: React.FC<InstallationFormPageProps> = (props) => {
     
     const storeUser = useAuthStore((state) => state.currentUser);
     const currentUser = storeUser || propUser;
+    
+    // Asset Categories needed for unit lookup
+    const assetCategories = useAssetStore((state) => state.categories);
 
     const [view, setView] = useState<'list' | 'form' | 'detail'>('list');
     const [selectedInstallation, setSelectedInstallation] = useState<Installation | null>(null);
@@ -138,9 +141,62 @@ const InstallationFormPage: React.FC<InstallationFormPageProps> = (props) => {
             status: ItemStatus.COMPLETED,
         };
         
-        await addInstallation(newInstallation);
+        // --- 1. Material Consumption & Validation (CRITICAL FIX) ---
+        // Validate stock availability BEFORE creating the installation record.
+        const customer = customers.find(c => c.id === installationData.customerId);
+        let materialsToInstall: InstalledMaterial[] = [];
 
-        // 1. Update Assets Status (Perangkat/Device - Individual Tracking)
+        if (installationData.materialsUsed && installationData.materialsUsed.length > 0) {
+             materialsToInstall = installationData.materialsUsed.map((material) => {
+                let unit = "pcs";
+                let convertedQuantity = material.quantity;
+                let materialFound = false;
+
+                for (const cat of assetCategories) {
+                    if (materialFound) break;
+                    for (const type of cat.types) {
+                        const matchedItem = type.standardItems?.find((item) => item.name === material.itemName && item.brand === material.brand);
+
+                        if (type.trackingMethod === "bulk" && matchedItem) {
+                            unit = matchedItem.baseUnitOfMeasure || type.unitOfMeasure || "pcs";
+                            const isInputContainer = material.unit === matchedItem.unitOfMeasure;
+                            if (matchedItem.quantityPerUnit && isInputContainer) {
+                                convertedQuantity = material.quantity * matchedItem.quantityPerUnit;
+                            } else {
+                                convertedQuantity = material.quantity;
+                            }
+                            materialFound = true;
+                            break;
+                        }
+                    }
+                }
+                return {
+                    ...material,
+                    quantity: convertedQuantity,
+                    unit: unit,
+                    installationDate: newInstallation.installationDate,
+                };
+            });
+             
+             // EXECUTE CONSUMPTION with Validation
+             const result = await consumeMaterials(
+                 materialsToInstall,
+                 { 
+                     customerId: installationData.customerId, 
+                     location: `Terpasang di: ${installationData.customerName}`,
+                     technicianName: installationData.technician
+                 }
+             );
+
+             // IF FAILED, STOP EVERYTHING
+             if (!result.success) {
+                 result.errors.forEach(err => addNotification(err, 'error'));
+                 return; // Abort
+             }
+        }
+
+        // --- 2. Update Assets Status (Devices) ---
+        // If material consumption passed, we proceed with devices
         for (const item of installationData.assetsInstalled) {
             if (item.assetId) {
                 await updateAsset(item.assetId, {
@@ -151,57 +207,39 @@ const InstallationFormPage: React.FC<InstallationFormPageProps> = (props) => {
                 });
             }
         }
-
-        // 2. Update Stock for Materials & Customer Status Logic
-        const customer = customers.find(c => c.id === installationData.customerId);
         
-        if (installationData.materialsUsed && installationData.materialsUsed.length > 0) {
-             // A. Consume Stock via Store Action
-             const result = await consumeMaterials(
-                 installationData.materialsUsed,
-                 { 
-                     customerId: installationData.customerId, 
-                     location: `Terpasang di: ${installationData.customerName}` 
-                 }
-             );
+        // --- 3. Save Installation Record ---
+        await addInstallation(newInstallation);
 
-             // Display warnings if stock ran out
-             if (result.warnings.length > 0) {
-                 result.warnings.forEach(w => addNotification(w, 'warning'));
-             }
+        // --- 4. Update Customer Record ---
+        if (customer) {
+             const existingMaterials = customer.installedMaterials || [];
+             const updatedMaterials = [...existingMaterials];
 
-             // B. Update Customer Record (Log Usage on Customer Profile)
-             if (customer) {
-                 const existingMaterials = customer.installedMaterials || [];
-                 const updatedMaterials = [...existingMaterials];
-
-                 installationData.materialsUsed!.forEach((newMat) => {
-                    const existingMatIndex = updatedMaterials.findIndex(
-                      (em) => em.itemName === newMat.itemName && em.brand === newMat.brand
-                    );
-                    if (existingMatIndex > -1) {
-                      updatedMaterials[existingMatIndex] = {
-                        ...updatedMaterials[existingMatIndex],
-                        quantity: updatedMaterials[existingMatIndex].quantity + newMat.quantity,
-                      };
-                    } else {
-                      updatedMaterials.push({
-                        ...newMat,
-                        installationDate: installationData.installationDate,
-                      });
-                    }
-                 });
-                 
-                 // SMART LOGIC: Update customer status to ACTIVE if assets installed
-                 const shouldActivate = customer.status !== CustomerStatus.ACTIVE;
-                 
-                 await updateCustomer(customer.id, { 
-                     installedMaterials: updatedMaterials,
-                     status: shouldActivate ? CustomerStatus.ACTIVE : customer.status
-                 });
-             }
+             materialsToInstall.forEach((newMat) => {
+                const existingMatIndex = updatedMaterials.findIndex(
+                  (em) => em.itemName === newMat.itemName && em.brand === newMat.brand
+                );
+                if (existingMatIndex > -1) {
+                  updatedMaterials[existingMatIndex] = {
+                    ...updatedMaterials[existingMatIndex],
+                    quantity: updatedMaterials[existingMatIndex].quantity + newMat.quantity,
+                  };
+                } else {
+                  updatedMaterials.push({
+                    ...newMat,
+                    installationDate: installationData.installationDate,
+                  });
+                }
+             });
+             
+             const shouldActivate = customer.status !== CustomerStatus.ACTIVE;
+             
+             await updateCustomer(customer.id, { 
+                 installedMaterials: updatedMaterials,
+                 status: shouldActivate ? CustomerStatus.ACTIVE : customer.status
+             });
         } else if (customer && installationData.assetsInstalled.length > 0) {
-             // If only devices installed (no materials), still check for activation
              if (customer.status !== CustomerStatus.ACTIVE) {
                  await updateCustomer(customer.id, { status: CustomerStatus.ACTIVE });
              }

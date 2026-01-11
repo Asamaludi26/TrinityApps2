@@ -6,7 +6,7 @@ import * as api from '../services/api';
 import { useNotificationStore } from './useNotificationStore';
 import { useMasterDataStore } from './useMasterDataStore';
 import { useAuthStore } from './useAuthStore';
-import { useRequestStore } from './useRequestStore'; // Cross-store access
+import { useRequestStore } from './useRequestStore'; 
 
 interface AssetState {
   assets: Asset[];
@@ -18,7 +18,6 @@ interface AssetState {
   fetchAssets: () => Promise<void>;
   addAsset: (asset: Asset | (Asset & { initialBalance?: number, currentBalance?: number })) => Promise<void>;
   updateAsset: (id: string, data: Partial<Asset>) => Promise<void>;
-  // REFACTOR: Added referenceId parameter
   updateAssetBatch: (ids: string[], data: Partial<Asset>, referenceId?: string) => Promise<void>; 
   deleteAsset: (id: string) => Promise<void>;
   
@@ -49,12 +48,11 @@ interface AssetState {
 
   consumeMaterials: (
       materials: { materialAssetId?: string, itemName: string, brand: string, quantity: number, unit: string }[],
-      context: { customerId?: string, location?: string, docNumber?: string }
-  ) => Promise<{ success: boolean; warnings: string[] }>;
+      context: { customerId?: string, location?: string, docNumber?: string, technicianName?: string }
+  ) => Promise<{ success: boolean; errors: string[] }>;
 }
 
 // --- UTILITY: SAFE MATH FOR FLOATING POINT ---
-// Membulatkan ke 4 desimal untuk menghindari error seperti 350 - 0.1 = 349.8999999999
 const safeRound = (num: number): number => {
     return Math.round((num + Number.EPSILON) * 10000) / 10000;
 };
@@ -145,7 +143,8 @@ export const useAssetStore = create<AssetState>()(
              quantity: logQty,
              referenceId: asset.poNumber || 'Initial',
              actor: asset.recordedBy,
-             notes: 'Penerimaan barang baru'
+             notes: 'Penerimaan barang baru',
+             locationContext: 'WAREHOUSE'
          });
       },
 
@@ -164,7 +163,6 @@ export const useAssetStore = create<AssetState>()(
              let type: MovementType | null = null;
              
              // --- SMART LOGGING FOR STATUS CHANGE ---
-             // Menentukan quantity log berdasarkan tipe aset
              const isMeasurement = originalAsset.currentBalance !== undefined;
              const qtyToLog = isMeasurement ? (originalAsset.currentBalance || 0) : 1;
 
@@ -197,7 +195,6 @@ export const useAssetStore = create<AssetState>()(
         }
       },
 
-      // REFACTOR: Parameter `referenceId` sekarang eksplisit, bukan `logAction`
       updateAssetBatch: async (ids, rawData, referenceId = 'Batch Update') => {
           const current = get().assets;
           const currentUser = useAuthStore.getState().currentUser?.name || 'System';
@@ -205,8 +202,6 @@ export const useAssetStore = create<AssetState>()(
 
           const updated = current.map(a => {
               if (ids.includes(a.id)) {
-                  // --- SMART MOVEMENT LOGGING FOR BATCH ---
-                  // Deteksi pergerakan stok Keluar/Masuk Gudang
                   const isMovingOut = a.status === AssetStatus.IN_STORAGE && rawData.status && rawData.status !== AssetStatus.IN_STORAGE;
                   const isMovingIn = a.status !== AssetStatus.IN_STORAGE && rawData.status === AssetStatus.IN_STORAGE;
                   
@@ -220,12 +215,12 @@ export const useAssetStore = create<AssetState>()(
                           date: new Date().toISOString(),
                           type: isMovingOut ? 'OUT_HANDOVER' : 'IN_RETURN',
                           quantity: qtyToLog,
-                          // FIX: Gunakan referenceId yang dikirim dari Page (misal No Dokumen Handover)
                           referenceId: referenceId, 
                           actor: currentUser,
                           notes: isMeasurement 
                             ? `Batch Move (${isMovingOut ? 'Keluar' : 'Masuk'}): ${a.id} berisi ${qtyToLog}` 
-                            : `Batch Move: ${a.id}`
+                            : `Batch Move: ${a.id}`,
+                          locationContext: isMovingOut ? 'WAREHOUSE' : 'CUSTODY'
                       });
                   }
 
@@ -249,7 +244,6 @@ export const useAssetStore = create<AssetState>()(
           await api.updateData('app_assets', updated);
           set({ assets: updated });
           
-          // Execute Movement Logs
           for (const mov of movementsToLog) {
               await get().recordMovement(mov);
           }
@@ -327,32 +321,25 @@ export const useAssetStore = create<AssetState>()(
           
           const isRequestingContainer = !requestUnit || requestUnit === containerUnit;
           
-          // 1. Get All Physical Assets in Storage (All Rows)
           const allPhysicalAssets = assets.filter(a => 
               a.name === itemName && 
               a.brand === brand && 
               a.status === AssetStatus.IN_STORAGE
           );
 
-          // 2. Filter Effective Assets based on Integrity (Full vs Partial)
-          // Jika Request Container (Unit Fisik), kita hanya boleh menghitung aset yang MASIH UTUH.
-          // Aset parsial (sisa potongan) tidak valid untuk diserahkan sebagai "1 Drum Utuh".
           let effectivePhysicalAssets = allPhysicalAssets;
           
           if (isMeasurement && isRequestingContainer) {
                effectivePhysicalAssets = allPhysicalAssets.filter(a => {
                     const current = a.currentBalance ?? 0;
                     const initial = a.initialBalance ?? 0;
-                    // Gunakan toleransi kecil untuk float comparison
                     return current >= (initial - 0.0001);
                });
           }
 
-          // Total Count untuk display UI (tetap tampilkan total baris agar user tau ada sisa)
           const totalPhysicalCount = allPhysicalAssets.length;
           const totalPhysicalContent = safeRound(allPhysicalAssets.reduce((sum, a) => sum + (a.currentBalance ?? 0), 0));
 
-          // 3. Calculate Reservations from Pending Requests
           const activeRequests = requests.filter(r => 
               r.id !== excludeRequestId &&
               ![ItemStatus.COMPLETED, ItemStatus.REJECTED, ItemStatus.CANCELLED].includes(r.status)
@@ -384,27 +371,18 @@ export const useAssetStore = create<AssetState>()(
           
           reservedContent = safeRound(reservedContent);
 
-          // 4. Calculate Available Count (Smart)
-          // Berdasarkan effectivePhysicalAssets (yang sudah difilter integritasnya)
-          // availableCount = Jumlah Aset Efektif - Reservasi Unit
           const availableCount = Math.max(0, effectivePhysicalAssets.length - reservedCount);
           
-          // Sort Assets for Recommendation Logic
-          // Strategi: 
-          // - Jika Request Container: Prioritaskan FIFO (Masuk Pertama Keluar Pertama)
-          // - Jika Request Eceran: Prioritaskan Aset Parsial (Habiskan sisa) baru Aset Utuh
           const sortedAssets = [...effectivePhysicalAssets].sort((a, b) => {
                if (isMeasurement && !isRequestingContainer) {
                     const aIsPartial = (a.currentBalance ?? 0) < (a.initialBalance ?? 0);
                     const bIsPartial = (b.currentBalance ?? 0) < (b.initialBalance ?? 0);
-                    if (aIsPartial && !bIsPartial) return -1; // A (Partial) first
-                    if (!aIsPartial && bIsPartial) return 1;  // B (Partial) first
+                    if (aIsPartial && !bIsPartial) return -1; 
+                    if (!aIsPartial && bIsPartial) return 1;  
                }
-               // Default FIFO
                return new Date(a.registrationDate).getTime() - new Date(b.registrationDate).getTime();
           });
 
-          // Exclude assets that are theoretically reserved by unit counts
           const assetsAvailableForAllocation = sortedAssets.slice(reservedCount);
           
           const rawAvailableContentSum = assetsAvailableForAllocation.reduce((sum, a) => sum + (a.currentBalance ?? 0), 0);
@@ -420,7 +398,6 @@ export const useAssetStore = create<AssetState>()(
                   recommendedSourceIds = assetsAvailableForAllocation.slice(0, qtyNeeded).map(a => a.id);
               } else {
                   isSufficient = availableContent >= qtyNeeded;
-                  // Cek apakah ada 1 aset yang cukup untuk memenuhi seluruh kebutuhan eceran?
                   const perfectFit = assetsAvailableForAllocation.find(a => (a.currentBalance ?? 0) >= qtyNeeded);
                   
                   if (!perfectFit && isSufficient) {
@@ -448,7 +425,7 @@ export const useAssetStore = create<AssetState>()(
               totalContent: totalPhysicalContent,
               reservedCount,
               reservedContent,
-              availableCount, // Ini adalah Available Container Count (sudah difilter Full Only jika measurement)
+              availableCount, 
               availableContent,
               availableSmart: isMeasurement ? (isRequestingContainer ? availableCount : availableContent) : availableCount,
               isSufficient,
@@ -477,9 +454,19 @@ export const useAssetStore = create<AssetState>()(
 
       consumeMaterials: async (materials, context) => {
           const { assets, categories } = get();
-          const warnings: string[] = [];
-          const pendingUpdates: Record<string, Partial<Asset>> = {};
-          const movementLogs: Omit<StockMovement, 'id' | 'balanceAfter'>[] = [];
+          const errors: string[] = [];
+          
+          // Phase 1: VALIDATION & PLANNING
+          const actorName = context.technicianName || useAuthStore.getState().currentUser?.name || 'System';
+          
+          type PlannedUpdate = {
+              assetId: string;
+              updates: Partial<Asset>;
+              movementLog: Omit<StockMovement, 'id' | 'balanceAfter'>;
+          };
+          
+          const plan: PlannedUpdate[] = [];
+          const tempBalances: Record<string, number> = {}; 
 
           for (const mat of materials) {
               let isMeasurement = false;
@@ -495,20 +482,39 @@ export const useAssetStore = create<AssetState>()(
               }
 
               let targetAssets: Asset[] = [];
+              let isExplicitSelection = false;
+
+              // 1. Try Specific ID
               if (mat.materialAssetId) {
                   const specificAsset = assets.find(a => a.id === mat.materialAssetId);
-                  if (specificAsset && specificAsset.status === AssetStatus.IN_STORAGE) {
+                  if (specificAsset && (
+                      specificAsset.status === AssetStatus.IN_STORAGE || 
+                      specificAsset.status === AssetStatus.IN_CUSTODY || 
+                      specificAsset.status === AssetStatus.IN_USE
+                  )) {
                       targetAssets = [specificAsset];
+                      isExplicitSelection = true;
                   } else {
-                       warnings.push(`Stok spesifik ${mat.materialAssetId} (${mat.itemName}) tidak valid/kosong.`);
+                       errors.push(`Stok spesifik ${mat.materialAssetId} (${mat.itemName}) tidak valid/ditemukan.`);
+                       continue; 
                   }
-              }
-              
-              if (targetAssets.length === 0) {
+              } 
+              // 2. Fallback: Auto-find (FIFO)
+              else {
                   targetAssets = assets
-                      .filter(a => a.name === mat.itemName && a.brand === mat.brand && a.status === AssetStatus.IN_STORAGE)
+                      .filter(a => {
+                          const isMatch = a.name === mat.itemName && a.brand === mat.brand;
+                          if (!isMatch) return false;
+                          const isOwnAsset = a.currentUser === actorName && (a.status === AssetStatus.IN_CUSTODY || a.status === AssetStatus.IN_USE);
+                          const isInStorage = a.status === AssetStatus.IN_STORAGE;
+                          return isOwnAsset || isInStorage;
+                      })
                       .sort((a, b) => {
-                           // Prioritize Partial items for consumption to reduce fragmentation
+                           const aIsOwn = a.currentUser === actorName;
+                           const bIsOwn = b.currentUser === actorName;
+                           if (aIsOwn && !bIsOwn) return -1;
+                           if (!aIsOwn && bIsOwn) return 1;
+                           
                            if (isMeasurement) {
                                 const aPartial = (a.currentBalance ?? 0) < (a.initialBalance ?? 0);
                                 const bPartial = (b.currentBalance ?? 0) < (b.initialBalance ?? 0);
@@ -519,61 +525,130 @@ export const useAssetStore = create<AssetState>()(
                       });
               }
 
-              if (isMeasurement) {
-                  let remainingNeed = mat.quantity;
-                  for (const asset of targetAssets) {
-                      if (remainingNeed <= 0) break;
-                      const currentPending = pendingUpdates[asset.id];
-                      const effectiveBalance = currentPending?.currentBalance !== undefined 
-                           ? currentPending.currentBalance 
-                           : (asset.currentBalance ?? asset.initialBalance ?? 0);
-
-                      if (effectiveBalance <= 0) continue;
-
-                      if (effectiveBalance > remainingNeed) {
-                          // USE SAFE MATH HERE
-                          const newBalance = safeRound(effectiveBalance - remainingNeed);
-                          pendingUpdates[asset.id] = { ...pendingUpdates[asset.id], currentBalance: newBalance, status: AssetStatus.IN_STORAGE };
-                          remainingNeed = 0;
-                      } else {
-                          pendingUpdates[asset.id] = { ...pendingUpdates[asset.id], currentBalance: 0, status: AssetStatus.CONSUMED };
-                          // USE SAFE MATH HERE
-                          remainingNeed = safeRound(remainingNeed - effectiveBalance);
-                      }
-                  }
-                  if (remainingNeed > 0) warnings.push(`Stok fisik ${mat.itemName} kurang ${remainingNeed} ${mat.unit}.`);
-              } else {
-                  const qtyToConsume = Math.min(mat.quantity, targetAssets.length);
-                  if (qtyToConsume > 0) {
-                      const itemsToUpdate = targetAssets.slice(0, qtyToConsume);
-                      for (const item of itemsToUpdate) {
-                          pendingUpdates[item.id] = { ...pendingUpdates[item.id], status: AssetStatus.IN_USE, currentUser: context.customerId || null, location: context.location || 'Digunakan' };
-                      }
-                  }
-                  if (qtyToConsume < mat.quantity) warnings.push(`Stok fisik ${mat.itemName} kurang ${mat.quantity - qtyToConsume} ${mat.unit}.`);
+              if (targetAssets.length === 0) {
+                  errors.push(`Stok ${mat.itemName} tidak tersedia.`);
+                  continue;
               }
 
-              movementLogs.push({
-                   assetName: mat.itemName,
-                   brand: mat.brand,
-                   date: new Date().toISOString(),
-                   type: 'OUT_INSTALLATION',
-                   quantity: mat.quantity,
-                   referenceId: context.docNumber || 'Usage',
-                   actor: 'System',
-                   notes: `Digunakan di ${context.location}`
+              if (isMeasurement) {
+                  let remainingNeed = mat.quantity;
+                  
+                  for (const asset of targetAssets) {
+                      if (remainingNeed <= 0) break;
+                      
+                      const currentEffectiveBalance = tempBalances[asset.id] !== undefined 
+                          ? tempBalances[asset.id] 
+                          : (asset.currentBalance ?? asset.initialBalance ?? 0);
+
+                      if (currentEffectiveBalance <= 0) continue;
+                      
+                      const isFromCustody = asset.status === AssetStatus.IN_CUSTODY || (asset.status === AssetStatus.IN_USE && asset.currentUser === actorName);
+                      const movementType = isFromCustody ? 'OUT_USAGE_CUSTODY' : 'OUT_INSTALLATION';
+                      const locationContext = isFromCustody ? 'CUSTODY' : 'WAREHOUSE';
+
+                      let usedAmount = 0;
+                      const updates: Partial<Asset> = {};
+
+                      if (currentEffectiveBalance > remainingNeed) {
+                          const newBalance = safeRound(currentEffectiveBalance - remainingNeed);
+                          updates.currentBalance = newBalance;
+                          tempBalances[asset.id] = newBalance;
+                          usedAmount = remainingNeed;
+                          remainingNeed = 0;
+                      } else {
+                          updates.currentBalance = 0;
+                          updates.status = AssetStatus.CONSUMED;
+                          tempBalances[asset.id] = 0;
+                          
+                          usedAmount = safeRound(currentEffectiveBalance);
+                          remainingNeed = safeRound(remainingNeed - currentEffectiveBalance);
+                      }
+                      
+                      plan.push({
+                          assetId: asset.id,
+                          updates,
+                          movementLog: {
+                               assetName: mat.itemName,
+                               brand: mat.brand,
+                               date: new Date().toISOString(),
+                               type: movementType,
+                               quantity: usedAmount,
+                               referenceId: context.docNumber || 'Usage',
+                               actor: actorName,
+                               notes: `Digunakan: ${usedAmount} ${mat.unit} (${context.location})`,
+                               locationContext: locationContext,
+                               relatedAssetId: asset.id
+                          }
+                      });
+                  }
+                  
+                  if (remainingNeed > 0) {
+                      errors.push(`Stok fisik ${mat.itemName} kurang ${remainingNeed} ${mat.unit}.`);
+                  }
+              } else {
+                  // Count Logic
+                  const qtyToConsume = Math.min(mat.quantity, targetAssets.length);
+                  if (qtyToConsume < mat.quantity) {
+                       errors.push(`Stok fisik ${mat.itemName} kurang ${mat.quantity - qtyToConsume} ${mat.unit}.`);
+                  } else {
+                      const itemsToUpdate = targetAssets.slice(0, qtyToConsume);
+                      for (const item of itemsToUpdate) {
+                          if (plan.some(p => p.assetId === item.id)) {
+                              errors.push(`Item ${item.id} (${item.name}) terpilih ganda dalam transaksi ini. Stok tidak cukup.`);
+                              break;
+                          }
+
+                          const isFromCustody = item.status === AssetStatus.IN_CUSTODY || (item.status === AssetStatus.IN_USE && item.currentUser === actorName);
+                          const locationContext = isFromCustody ? 'CUSTODY' : 'WAREHOUSE';
+                          
+                          plan.push({
+                              assetId: item.id,
+                              updates: { status: AssetStatus.IN_USE, currentUser: context.customerId || null, location: context.location || 'Digunakan' },
+                              movementLog: {
+                                   assetName: mat.itemName,
+                                   brand: mat.brand,
+                                   date: new Date().toISOString(),
+                                   type: 'OUT_INSTALLATION',
+                                   quantity: 1, 
+                                   referenceId: context.docNumber || 'Usage',
+                                   actor: actorName,
+                                   notes: `Unit ${item.id} digunakan di ${context.location}`,
+                                   locationContext: locationContext,
+                                   relatedAssetId: item.id
+                              }
+                          });
+                      }
+                  }
+              }
+          }
+
+          // Phase 2: EXECUTION
+          if (errors.length > 0) {
+              return { success: false, errors };
+          }
+          
+          const currentAssets = get().assets;
+          const updatedAssets = currentAssets.map(a => {
+              // FIX: Use filter to get ALL updates for this asset (multi-cut support)
+              const assetPlans = plan.filter(p => p.assetId === a.id);
+              if (assetPlans.length === 0) return a;
+              
+              let mergedUpdates = {};
+              assetPlans.forEach(p => {
+                  mergedUpdates = { ...mergedUpdates, ...p.updates };
               });
+              
+              return { ...a, ...mergedUpdates };
+          });
+
+          await api.updateData('app_assets', updatedAssets);
+          set({ assets: updatedAssets });
+          
+          for (const p of plan) {
+              await get().recordMovement(p.movementLog);
           }
           
-          if (Object.keys(pendingUpdates).length > 0) {
-             const currentAssets = get().assets;
-             const updatedAssets = currentAssets.map(a => pendingUpdates[a.id] ? { ...a, ...pendingUpdates[a.id] } : a);
-             await api.updateData('app_assets', updatedAssets);
-             set({ assets: updatedAssets });
-             for (const log of movementLogs) await get().recordMovement(log);
-          }
-          
-          return { success: true, warnings };
+          return { success: true, errors: [] };
       }
     }),
     {

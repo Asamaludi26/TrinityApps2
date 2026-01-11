@@ -272,53 +272,66 @@ export const MANDATORY_PERMISSIONS: Partial<Record<UserRole, Permission[]>> = {
 
 // Dependensi yang "Keras" (Parent WAJIB ada jika Child ada)
 // Format: Child -> [Parent1, Parent2]
+// Jika Parent dicabut, Child otomatis dicabut. Jika Child dipilih, Parent otomatis terpilih.
 export const PERMISSION_DEPENDENCIES: Partial<Record<Permission, Permission[]>> = {
     // Requests
     'requests:create': ['requests:view:own'],
     'requests:create:urgent': ['requests:view:own'],
-    'requests:delete': ['requests:view:own'],
+    'requests:delete': ['requests:view:own'], // Harus bisa lihat untuk hapus
     'requests:cancel:own': ['requests:view:own'],
+    'requests:view:all': ['requests:view:own'], // View all implies view own usually
     'requests:approve:logistic': ['requests:view:all'],
     'requests:approve:purchase': ['requests:view:all'],
     'requests:approve:final': ['requests:view:all'],
     
     // Loan Requests
     'loan-requests:create': ['loan-requests:view:own'],
+    'loan-requests:view:all': ['loan-requests:view:own'],
     'loan-requests:approve': ['loan-requests:view:all'],
     'loan-requests:return': ['loan-requests:view:all'],
 
-    // Assets
+    // Assets CRUD Hierarchy
     'assets:view:division': ['assets:view'],
     'assets:view-price': ['assets:view'],
     'assets:create': ['assets:view'],
     'assets:edit': ['assets:view'],
     'assets:delete': ['assets:view'],
-    'assets:handover': ['assets:view'],
+    
+    // Asset Transactions
+    'assets:handover': ['assets:view', 'handovers:view'],
     'handovers:view': ['assets:view'],
-    'assets:dismantle': ['assets:view', 'customers:view'],
+    
+    'assets:dismantle': ['assets:view', 'customers:view', 'dismantles:view'],
     'dismantles:view': ['customers:view'],
-    'assets:install': ['assets:view', 'customers:view'],
+    
+    'assets:install': ['assets:view', 'customers:view', 'installations:view'],
     'installations:view': ['customers:view'],
-    'maintenances:create': ['customers:view', 'assets:view'],
+    
+    'maintenances:create': ['customers:view', 'assets:view', 'maintenances:view'],
     'maintenances:view': ['customers:view'],
+    
     'assets:repair:report': ['assets:view'],
-    'assets:repair:manage': ['assets:view'],
+    'assets:repair:manage': ['assets:view', 'assets:repair:report'],
     
     // Stock
     'stock:manage': ['stock:view'],
     
-    // Customers
+    // Customers CRUD
     'customers:create': ['customers:view'],
     'customers:edit': ['customers:view'],
     'customers:delete': ['customers:view'],
     
-    // Users & Settings
+    // Users & Settings CRUD
     'users:create': ['users:view'],
     'users:edit': ['users:view'],
     'users:delete': ['users:view'],
     'users:reset-password': ['users:view'],
     'users:manage-permissions': ['users:view'],
     'divisions:manage': ['users:view'], 
+    
+    // Reports & System
+    'reports:view': ['dashboard:view'],
+    'data:export': ['dashboard:view'],
     'system:audit-log': ['dashboard:view'],
 };
 
@@ -355,27 +368,31 @@ export const resolveDependencies = (permission: Permission): Permission[] => {
 export const resolveDependents = (parentPermission: Permission): Permission[] => {
     const dependents = new Set<Permission>();
     
-    // Scan all rules to find immediate children
-    const directChildren: Permission[] = [];
-    for (const [child, parents] of Object.entries(PERMISSION_DEPENDENCIES)) {
-        if (parents && parents.includes(parentPermission)) {
-            directChildren.push(child as Permission);
-        }
-    }
+    // Scan all rules to find immediate children (Reverse Lookup)
+    // Map: Parent -> [Children]
+    const dependencyMap = new Map<Permission, Permission[]>();
     
-    // Process queue
-    const queue = [...directChildren];
+    for (const [child, parents] of Object.entries(PERMISSION_DEPENDENCIES)) {
+        parents?.forEach(parent => {
+             const existing = dependencyMap.get(parent as Permission) || [];
+             existing.push(child as Permission);
+             dependencyMap.set(parent as Permission, existing);
+        });
+    }
+
+    const queue = [parentPermission];
+    
     while(queue.length > 0) {
-        const current = queue.shift()!;
-        if (!dependents.has(current)) {
-            dependents.add(current);
-            
-            // Find children of this child
-             for (const [grandChild, grandParents] of Object.entries(PERMISSION_DEPENDENCIES)) {
-                if (grandParents && grandParents.includes(current)) {
-                    queue.push(grandChild as Permission);
+        const currentParent = queue.shift()!;
+        const children = dependencyMap.get(currentParent);
+        
+        if (children) {
+            children.forEach(child => {
+                if (!dependents.has(child)) {
+                    dependents.add(child);
+                    queue.push(child);
                 }
-            }
+            });
         }
     }
     
@@ -384,19 +401,24 @@ export const resolveDependents = (parentPermission: Permission): Permission[] =>
 
 /**
  * UPDATED: Sanitasi Izin yang Lebih Ketat
- * 1. Menghapus permission yang dilarang (Restricted).
- * 2. Menginjeksi (menambahkan) permission yang wajib (Mandatory) untuk role tersebut.
+ * 1. Menghapus permission yang dilarang (Restricted) - PRIORITAS UTAMA.
+ * 2. Menginjeksi (menambahkan) permission yang wajib (Mandatory) untuk role tersebut,
+ *    TAPI hanya jika tidak dilarang (avoid conflict loops).
  * Ini memastikan integritas data bahkan jika UI mengirimkan data parsial.
  */
 export const sanitizePermissions = (permissions: Permission[], role: UserRole): Permission[] => {
     const restricted = ROLE_RESTRICTIONS[role] || [];
     const mandatory = MANDATORY_PERMISSIONS[role] || [];
     
-    // 1. Filter out restricted permissions
-    const cleanPermissions = permissions.filter(p => !restricted.includes(p));
+    // 1. Filter out restricted permissions from input
+    // Ini memastikan user tidak bisa punya akses yang dilarang
+    let cleanPermissions = permissions.filter(p => !restricted.includes(p));
 
-    // 2. Inject mandatory permissions (using Set to handle duplicates)
-    const combinedPermissions = new Set([...cleanPermissions, ...mandatory]);
+    // 2. Inject mandatory permissions (only if NOT restricted)
+    // Ini menangani kasus konflik konfigurasi: Restriction wins.
+    const safeMandatory = mandatory.filter(p => !restricted.includes(p));
+    
+    const combinedPermissions = new Set([...cleanPermissions, ...safeMandatory]);
 
     return Array.from(combinedPermissions);
 };

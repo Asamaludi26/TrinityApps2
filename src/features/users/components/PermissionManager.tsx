@@ -37,14 +37,16 @@ export const PermissionManager: React.FC<PermissionManagerProps> = ({ currentPer
     useEffect(() => {
         if (disabled) return;
         
-        const missingMandatory = mandatoryPermissions.filter(p => !currentPermissions.includes(p));
+        // Filter mandatory yang belum ada DAN tidak restricted
+        const missingMandatory = mandatoryPermissions.filter(p => 
+            !currentPermissions.includes(p) && !restrictedPermissions.includes(p)
+        );
         
         if (missingMandatory.length > 0) {
-            // Gabungkan permission saat ini dengan yang wajib, hilangkan duplikat
             const healedPermissions = Array.from(new Set([...currentPermissions, ...missingMandatory]));
             onChange(healedPermissions);
         }
-    }, [mandatoryPermissions, currentPermissions, onChange, disabled]);
+    }, [mandatoryPermissions, restrictedPermissions, currentPermissions, onChange, disabled]);
 
     // Logic: Dependency Resolution & Cascading Updates
     const handlePermissionChange = (permissionKey: Permission, checked: boolean) => {
@@ -57,7 +59,11 @@ export const PermissionManager: React.FC<PermissionManagerProps> = ({ currentPer
             // 2. Add Dependencies (Parents) recursively
             // Example: "Create Asset" automatically checks "View Asset"
             const dependencies = resolveDependencies(permissionKey);
-            dependencies.forEach(dep => updatedPermissions.add(dep));
+            dependencies.forEach(dep => {
+                if (!restrictedPermissions.includes(dep)) {
+                    updatedPermissions.add(dep);
+                }
+            });
 
         } else {
             // 1. Remove current
@@ -69,9 +75,12 @@ export const PermissionManager: React.FC<PermissionManagerProps> = ({ currentPer
             dependents.forEach(dep => updatedPermissions.delete(dep));
         }
 
-        // 3. Enforce Mandatory (Re-add mandatory if removed accidentally by logic)
-        // Safety net ensuring core roles always have their base permissions
-        mandatoryPermissions.forEach(mp => updatedPermissions.add(mp));
+        // 3. Enforce Mandatory (Re-add mandatory if removed accidentally by logic, unless restricted)
+        mandatoryPermissions.forEach(mp => {
+            if (!restrictedPermissions.includes(mp)) {
+                updatedPermissions.add(mp);
+            }
+        });
 
         onChange(Array.from(updatedPermissions));
     };
@@ -79,30 +88,37 @@ export const PermissionManager: React.FC<PermissionManagerProps> = ({ currentPer
     const handleGroupToggle = (groupPermissions: Permission[], isAllChecked: boolean) => {
         let updatedPermissions = new Set(currentPermissions);
         
-        // Filter out restricted permissions for this role so we don't accidentally add them
+        // Hanya operasikan permission yang diizinkan untuk role ini
         const allowedGroupPermissions = groupPermissions.filter(p => !restrictedPermissions.includes(p));
 
         if (isAllChecked) {
-            // Uncheck All
+            // Uncheck All in Group
             allowedGroupPermissions.forEach(p => {
+                // Jangan hapus jika wajib
                 if (!mandatoryPermissions.includes(p)) {
                     updatedPermissions.delete(p);
-                    // Also remove children/dependents
+                    // Hapus juga dependent permissions (children)
+                    // Note: Dependent mungkin berada di luar grup ini, tapi harus tetap dihapus untuk konsistensi
                     const dependents = resolveDependents(p);
                     dependents.forEach(dep => updatedPermissions.delete(dep));
                 }
             });
         } else {
-            // Check All (Smart Select)
+            // Check All in Group (Smart Select)
             allowedGroupPermissions.forEach(p => {
                 // SECURITY FEATURE: Skip sensitive permissions during bulk select.
                 // User must explicitly check sensitive items (like "Delete" or "View Price").
-                if (SENSITIVE_PERMISSIONS.includes(p)) return;
+                // Kecuali jika permission itu Mandatory.
+                if (SENSITIVE_PERMISSIONS.includes(p) && !mandatoryPermissions.includes(p)) return;
 
                 updatedPermissions.add(p);
-                // Add dependencies
+                // Add dependencies (parents)
                 const parents = resolveDependencies(p);
-                parents.forEach(par => updatedPermissions.add(par));
+                parents.forEach(par => {
+                    if (!restrictedPermissions.includes(par)) {
+                        updatedPermissions.add(par);
+                    }
+                });
             });
         }
         
@@ -110,8 +126,9 @@ export const PermissionManager: React.FC<PermissionManagerProps> = ({ currentPer
     };
 
     const handleReset = () => {
-        // Reset to mandatory only
-        onChange([...mandatoryPermissions]);
+        // Reset to mandatory only (sanitized)
+        const safeMandatory = mandatoryPermissions.filter(p => !restrictedPermissions.includes(p));
+        onChange(safeMandatory);
     };
 
     // MEMOIZED FILTERING
@@ -154,16 +171,19 @@ export const PermissionManager: React.FC<PermissionManagerProps> = ({ currentPer
             <fieldset disabled={disabled} className="space-y-4">
                 {filteredGroups.map(group => {
                     const groupKeys = group.permissions.map(p => p.key);
+                    
+                    // Filter: Hanya permission yang BOLEH diambil oleh role ini
                     const availableKeys = groupKeys.filter(k => !restrictedPermissions.includes(k));
                     
-                    // Count only checks that are NOT sensitive (for the group checkbox logic)
-                    const safeKeys = availableKeys.filter(k => !SENSITIVE_PERMISSIONS.includes(k));
+                    // Filter: Untuk logika Checkbox Group, kita kecualikan yang Sensitif (karena bulk select skip sensitive)
+                    // Ini agar checkbox group menjadi 'checked' jika semua NON-SENSITIVE terpilih.
+                    const targetableKeys = availableKeys.filter(k => !SENSITIVE_PERMISSIONS.includes(k) || mandatoryPermissions.includes(k));
                     
-                    // Count is effectively checked if it's in currentPermissions OR if it is Mandatory
-                    const safeCheckedCount = safeKeys.filter(k => currentPermissions.includes(k) || mandatoryPermissions.includes(k)).length;
+                    // Hitung berapa yang sudah terpilih dari targetable
+                    const checkedCount = targetableKeys.filter(k => currentPermissions.includes(k)).length;
                     
-                    const isAllChecked = safeKeys.length > 0 && safeCheckedCount === safeKeys.length;
-                    const isIndeterminate = safeCheckedCount > 0 && safeCheckedCount < safeKeys.length;
+                    const isAllChecked = targetableKeys.length > 0 && checkedCount === targetableKeys.length;
+                    const isIndeterminate = checkedCount > 0 && checkedCount < targetableKeys.length;
                     
                     const isExpanded = expandedGroups.includes(group.group) || searchQuery.length > 0;
 
@@ -183,8 +203,8 @@ export const PermissionManager: React.FC<PermissionManagerProps> = ({ currentPer
                                     </button>
                                     <h4 className="text-sm font-semibold text-gray-800">{group.group}</h4>
                                     <span className="px-2 py-0.5 text-[10px] font-bold text-gray-500 bg-gray-200 rounded-full">
-                                        {/* Display effective count including mandatory */}
-                                        {currentPermissions.filter(p => groupKeys.includes(p)).length + groupKeys.filter(k => !currentPermissions.includes(k) && mandatoryPermissions.includes(k)).length} / {groupKeys.length}
+                                        {/* Display effective count: Actual Checked vs Available */}
+                                        {currentPermissions.filter(p => groupKeys.includes(p)).length} / {availableKeys.length}
                                     </span>
                                 </div>
                                 <div onClick={e => e.stopPropagation()}>
@@ -193,7 +213,7 @@ export const PermissionManager: React.FC<PermissionManagerProps> = ({ currentPer
                                             checked={isAllChecked}
                                             onChange={() => handleGroupToggle(groupKeys, isAllChecked)}
                                             indeterminate={isIndeterminate}
-                                            disabled={disabled}
+                                            disabled={disabled || targetableKeys.length === 0}
                                         />
                                         <span>Pilih Grup</span>
                                     </label>
@@ -207,9 +227,8 @@ export const PermissionManager: React.FC<PermissionManagerProps> = ({ currentPer
                                         const isForbidden = restrictedPermissions.includes(permission.key);
                                         const isSensitive = SENSITIVE_PERMISSIONS.includes(permission.key);
                                         
-                                        // VISUAL LOGIC FIX:
-                                        // Checkbox is checked if it's in state OR if it is Mandatory.
-                                        const isChecked = currentPermissions.includes(permission.key) || isMandatory;
+                                        // Check visual state
+                                        const isChecked = currentPermissions.includes(permission.key);
                                         
                                         if (isForbidden && !showRestricted) return null;
 
@@ -217,7 +236,10 @@ export const PermissionManager: React.FC<PermissionManagerProps> = ({ currentPer
                                         if (isChecked) cardClass = 'bg-blue-50/30 border-blue-200';
                                         if (isSensitive) cardClass = isChecked ? 'bg-amber-50 border-amber-200' : 'bg-white border-amber-100 hover:border-amber-300';
                                         if (isForbidden) cardClass = 'bg-gray-100 border-transparent opacity-60 cursor-not-allowed';
-                                        if (isMandatory) cardClass = 'bg-blue-50/50 border-blue-200 cursor-not-allowed'; // Mandatory looks distinctly locked & checked
+                                        if (isMandatory) cardClass = 'bg-blue-50/50 border-blue-200 cursor-not-allowed'; // Mandatory locked
+
+                                        // Conflict case: Mandatory but Forbidden (Config Error safe handling)
+                                        if (isMandatory && isForbidden) cardClass = 'bg-red-50 border-red-200 opacity-60 cursor-not-allowed';
 
                                         return (
                                             <label 
@@ -237,15 +259,17 @@ export const PermissionManager: React.FC<PermissionManagerProps> = ({ currentPer
                                                             {permission.label}
                                                         </span>
                                                         
-                                                        {isMandatory && <LockIcon className="w-3 h-3 text-blue-600" title="Wajib (Terkunci)" />}
-                                                        {isSensitive && !isForbidden && <ExclamationTriangleIcon className="w-3 h-3 text-amber-500" title="Sensitif" />}
-                                                        {isForbidden && <LockIcon className="w-3 h-3 text-gray-400" title="Dibatasi" />}
+                                                        <div className="flex items-center gap-1">
+                                                            {isMandatory && <LockIcon className="w-3 h-3 text-blue-600" title="Wajib (Terkunci)" />}
+                                                            {isSensitive && !isForbidden && <ExclamationTriangleIcon className="w-3 h-3 text-amber-500" title="Sensitif" />}
+                                                            {isForbidden && <LockIcon className="w-3 h-3 text-gray-400" title="Dibatasi untuk role ini" />}
+                                                        </div>
                                                     </div>
                                                     <p className="text-[10px] text-gray-400 font-mono truncate">{permission.key}</p>
                                                     
                                                     {/* Contextual Badges */}
                                                     <div className="flex flex-wrap gap-1 mt-1.5">
-                                                        {isMandatory && <span className="text-[9px] px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-bold">Wajib</span>}
+                                                        {isMandatory && !isForbidden && <span className="text-[9px] px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded font-bold">Wajib</span>}
                                                         {isSensitive && !isForbidden && <span className="text-[9px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">Hati-hati</span>}
                                                         {isForbidden && <span className="text-[9px] px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded">Dilarang</span>}
                                                     </div>

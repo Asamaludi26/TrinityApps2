@@ -77,7 +77,7 @@ const allMenuItems: MenuItem[] = [
     children: [
       { id: 'customers', label: 'Daftar Pelanggan', icon: UsersIcon, permission: 'customers:view' },
       { id: 'customer-installation-form', page: 'customer-installation-form', label: 'Manajemen Instalasi', icon: FileSignatureIcon, permission: 'assets:install' },
-      { id: 'customer-maintenance-form', page: 'customer-maintenance-form', label: 'Manajemen Maintenance', icon: WrenchIcon, permission: 'assets:repair:manage' },
+      { id: 'customer-maintenance-form', page: 'customer-maintenance-form', label: 'Manajemen Maintenance', icon: WrenchIcon, permission: 'maintenances:view' },
       { id: 'customer-dismantle', page: 'customer-dismantle', label: 'Data Dismantle', icon: DismantleIcon, permission: 'assets:dismantle' },
     ],
   },

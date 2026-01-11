@@ -582,7 +582,7 @@ export type PreviewData = {
     data?: any;
 };
 
-export type MovementType = 'IN_PURCHASE' | 'IN_RETURN' | 'OUT_INSTALLATION' | 'OUT_HANDOVER' | 'OUT_BROKEN' | 'OUT_ADJUSTMENT';
+export type MovementType = 'IN_PURCHASE' | 'IN_RETURN' | 'OUT_INSTALLATION' | 'OUT_HANDOVER' | 'OUT_BROKEN' | 'OUT_ADJUSTMENT' | 'OUT_USAGE_CUSTODY';
 
 export interface StockMovement {
     id: string;
@@ -595,4 +595,6 @@ export interface StockMovement {
     referenceId?: string;
     actor: string;
     notes?: string;
+    locationContext?: 'WAREHOUSE' | 'CUSTODY'; // New field to track source context
+    relatedAssetId?: string; // Optional: Link to specific asset ID
 }
