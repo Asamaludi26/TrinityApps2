@@ -229,6 +229,13 @@ export const TrackingSection: React.FC<TrackingSectionProps> = ({
     // Calculate Total Length for Measurement
     const totalMeasurementLength = formData.bulkItems.reduce((acc, item) => acc + (item.initialBalance || 0), 0);
 
+    // STRICT INTEGER KEY HANDLER
+    const handleKeyDownInteger = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (['.', ',', 'e', 'E', '-'].includes(e.key)) {
+            e.preventDefault();
+        }
+    };
+
     return (
         <FormSection title="Detail Unit Aset" icon={<InfoIcon className="w-6 h-6 mr-3 text-tm-primary" />} className="md:col-span-2">
             {!isBulkMode ? (
@@ -290,8 +297,10 @@ export const TrackingSection: React.FC<TrackingSectionProps> = ({
                                         <input 
                                             type="number" 
                                             min="1" 
+                                            step="1"
                                             value={genQty} 
                                             onChange={(e) => setGenQty(Math.max(1, parseInt(e.target.value) || 0))}
+                                            onKeyDown={handleKeyDownInteger}
                                             className="block w-full px-3 py-2 text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm sm:text-sm" 
                                         />
                                     </div>
@@ -390,7 +399,9 @@ export const TrackingSection: React.FC<TrackingSectionProps> = ({
                                             value={formData.quantity} 
                                             onChange={(e) => updateField('quantity', e.target.value === '' ? '' : parseInt(e.target.value, 10))} 
                                             min="1" 
+                                            step="1"
                                             required 
+                                            onKeyDown={handleKeyDownInteger}
                                             className="block w-full py-3 px-4 text-xl font-bold text-tm-primary bg-gray-50 border border-gray-300 rounded-lg shadow-inner focus:ring-tm-primary focus:border-tm-primary" 
                                         />
                                         <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400 pointer-events-none">{unitLabel}</span>

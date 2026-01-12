@@ -46,7 +46,7 @@ const FormSection: React.FC<{ title: string; icon: React.ReactNode; children: Re
     </div>
 );
 
-const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, onCancel }) => {
+const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, onCancel, assetCategories }) => {
     // Hooks Logic
     const { installableAssets, materialOptions } = useCustomerAssetLogic();
     const currentUser = useAuthStore(state => state.currentUser)!; // Access current user
@@ -489,8 +489,24 @@ const CustomerForm: React.FC<CustomerFormProps> = ({ customer, assets, onSave, o
                                         <input 
                                             type="number" 
                                             value={material.quantity}
-                                            onChange={(e) => handleMaterialChange(material.tempId, 'quantity', e.target.value === '' ? '' : Number(e.target.value))}
+                                            onChange={(e) => {
+                                                const [name, brand] = material.modelKey.split('|');
+                                                // STRICT INTEGER LOGIC: Always parse to int, or allow empty string
+                                                // No measurement logic needed here anymore as we enforce integers
+                                                const val = e.target.value;
+                                                // Prevent entering non-numeric chars except digits
+                                                if (!/^\d*$/.test(val)) return;
+
+                                                handleMaterialChange(material.tempId, 'quantity', val === '' ? '' : Number(val));
+                                            }}
                                             min="0"
+                                            step="1"
+                                            onKeyDown={(e) => {
+                                                // STRICT INTEGER: Block decimal keys
+                                                if (['.', ',', 'e', 'E'].includes(e.key)) {
+                                                    e.preventDefault();
+                                                }
+                                            }}
                                             className={`block w-full px-3 py-2 mt-1 text-gray-900 bg-white border rounded-lg shadow-sm sm:text-sm ${material.quantity === 0 ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`}
                                             placeholder="0"
                                         />

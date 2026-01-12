@@ -39,7 +39,7 @@ interface MaintenanceFormProps {
 const allWorkTypes = ['Ganti Perangkat', 'Splicing FO', 'Tarik Ulang Kabel', 'Ganti Konektor', 'Backup Sementara', 'Lainnya'];
 
 const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customers, assets, users, maintenances, onSave, onCancel, isLoading, prefillCustomerId, prefillAssetId }) => {
-    const { getCustomerAssets, getReplacementOptions, materialOptions } = useCustomerAssetLogic();
+    const { getCustomerAssets, getReplacementOptions, materialOptions, categories } = useCustomerAssetLogic();
 
     const [maintenanceDate, setMaintenanceDate] = useState<Date | null>(new Date());
     const [docNumber, setDocNumber] = useState('');
@@ -550,7 +550,15 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
-                                {additionalMaterials.map((material, index) => (
+                                {additionalMaterials.map((material, index) => {
+                                    const handleQtyKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+                                        // STRICT INTEGER: ALWAYS BLOCK DECIMALS
+                                        if (['.', ',', 'e', 'E'].includes(e.key)) {
+                                            e.preventDefault();
+                                        }
+                                    };
+
+                                    return (
                                     <tr key={material.id} className="bg-white">
                                         <td className="px-4 py-3 align-top">
                                             <div className="flex flex-col gap-1">
@@ -560,7 +568,16 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                                         </td>
                                         <td className="px-4 py-3 align-top">
                                              <div className="relative">
-                                                <input type="number" value={material.quantity} onChange={e => handleMaterialChange(material.id, 'quantity', e.target.value)} min="0.1" step="0.1" className="block w-full px-3 py-2 text-sm text-gray-900 bg-white border border-gray-300 rounded-lg shadow-sm pr-10" placeholder="0"/>
+                                                <input 
+                                                    type="number" 
+                                                    value={material.quantity} 
+                                                    onChange={e => handleMaterialChange(material.id, 'quantity', e.target.value)} 
+                                                    min="1"
+                                                    step="1"
+                                                    onKeyDown={handleQtyKeyDown}
+                                                    className="block w-full px-3 py-2 text-sm text-gray-900 bg-white border border-gray-300 rounded-lg shadow-sm pr-10" 
+                                                    placeholder="0"
+                                                />
                                                 <span className="absolute right-3 top-2 text-xs text-gray-500">{material.unit}</span>
                                             </div>
                                         </td>
@@ -571,7 +588,7 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                                             <button type="button" onClick={() => removeAdditionalMaterial(material.id)} className="p-2 text-red-500 rounded-full hover:bg-red-100 bg-white border border-gray-200"><TrashIcon className="w-4 h-4" /></button>
                                         </td>
                                     </tr>
-                                ))}
+                                )})}
                             </tbody>
                         </table>
                         <div className="bg-gray-50 p-2 border-t text-center">
@@ -672,9 +689,12 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                     brand={allocationModal.brand}
                     assets={assets}
                     onSelect={handleAllocationSelect}
-                    currentSelectedId={allocationModal.itemIndex !== null ? additionalMaterials[allocationModal.itemIndex]?.materialAssetId : undefined}
-                    currentUser={currentUser} 
-                    ownerName={technician} // PASSING TECHNICIAN NAME
+                    currentSelectedId={
+                        allocationModal.itemIndex !== null 
+                        ? additionalMaterials[allocationModal.itemIndex]?.materialAssetId 
+                        : undefined
+                    }
+                    currentUser={currentUser} // Pass currentUser here
                 />
             )}
         </>

@@ -242,12 +242,17 @@ export const RequestForm: React.FC<RequestFormProps> = ({
           const containerUnit = selectedModel.unitOfMeasure || 'Hasbal';
           const baseUnit = selectedModel.baseUnitOfMeasure || 'Meter';
           
+          // INTELLIGENT RESET: Only reset if converting from Base (Big Number) to Container (Small Number)
+          // Threshold logic: If quantity is > 50 (likely Meters) and switching to Container, assume user needs to reset to 1 container.
+          // Otherwise preserve number (e.g. 5 Meters -> 5 Hasbal is weird, but 5 Hasbal -> 5 Meters is definitely weird. Resetting to 1 is safer for upscaling).
           if (item.unit === baseUnit && newUnit === containerUnit) {
-              if (newQty > 10) { 
+              if (newQty > 50) { // Threshold for "Big Number"
                   newQty = 1;
-                  addNotification("Kuantitas di-reset ke 1 karena perubahan satuan ke fisik (kontainer).", "info");
+                  addNotification("Kuantitas di-reset ke 1 (Mode Kontainer).", "info");
               }
           }
+          // Note: If switching Container -> Base (1 Hasbal -> Meter), we *could* auto-multiply by quantityPerUnit,
+          // but better let user type "1000" explicitly to be sure.
       }
 
       updateItemState(itemId, { unit: newUnit, quantity: newQty });
@@ -453,15 +458,15 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                           const isMeasurement = selectedModel?.bulkType === 'measurement';
                           const isContainerMode = item.unit === selectedModel?.unitOfMeasure;
                           
-                          // --- REFACTOR START: Dynamic Step & Min Calculation ---
-                          // Logic: 
-                          // 1. If Measurement (e.g. Meter) AND Not Container (e.g. Hasbal), we allow decimals.
-                          // 2. If Unit/Count OR Container Mode, we force integers.
-                          
-                          const allowDecimals = isMeasurement && !isContainerMode;
-                          const inputStep = allowDecimals ? "0.1" : "1";
-                          const inputMin = allowDecimals ? "0.1" : "1";
-                          // --- REFACTOR END ---
+                          // --- STRICT TYPE ENFORCEMENT START ---
+                          // FIX: Always block decimals to align with Admin Cut logic (300m given = 300m recorded).
+                          const handleQuantityKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+                              // Block '.', ',', 'e', 'E' to enforce integers
+                              if (['.', ',', 'e', 'E'].includes(e.key)) {
+                                  e.preventDefault();
+                              }
+                          };
+                          // --- STRICT TYPE ENFORCEMENT END ---
                           
                           let availableUnitOptions = STANDARD_UNIT_OPTIONS.map(u => ({ value: u, label: u }));
                           
@@ -535,8 +540,9 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                                                         type="number" 
                                                         value={item.quantity} 
                                                         onChange={e => updateItemState(item.id, { quantity: parseFloat(e.target.value) || 0 })} 
-                                                        min={inputMin} 
-                                                        step={inputStep} 
+                                                        min={1} 
+                                                        step={1}
+                                                        onKeyDown={handleQuantityKeyDown}
                                                         className="w-1/2 pl-3 pr-1 py-2 bg-white border border-slate-300 rounded-l-md text-sm font-bold text-center text-slate-800 focus:ring-1 focus:ring-tm-primary focus:border-tm-primary outline-none z-10" 
                                                     />
                                                     <select

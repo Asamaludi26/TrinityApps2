@@ -285,6 +285,13 @@ export const HandoverForm: React.FC<HandoverFormProps> = ({ onSave, onCancel, pr
         });
     }, [assets, items, currentUser.role, prefillData, menyerahkan]);
 
+    // STRICT INTEGER: Handover adalah proses Gudang (Potong Kabel) -> Teknisi. Selalu Integer.
+    const handleKeyDownIntegerOnly = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (['.', ',', 'e', 'E', '-'].includes(e.key)) {
+            e.preventDefault();
+        }
+    };
+
     return (
         <>
             <form id={formId} onSubmit={handleSubmit} className="space-y-6">
@@ -359,11 +366,10 @@ export const HandoverForm: React.FC<HandoverFormProps> = ({ onSave, onCancel, pr
                                 }
                             }
 
-                            // FLAGS FOR INPUT ATTRS
                             const isQtyDisabled = isSystemInitiated || item.isLocked;
-                            // FIX: Dynamic Min & Step based on Type
-                            const stepValue = isMeasurement ? 0.1 : 1;
-                            const minValue = isMeasurement ? 0.1 : 1;
+                            // FIX: Force Step 1 & Min 1 for Handover (Integer only)
+                            const stepValue = 1;
+                            const minValue = 1;
 
                             return (
                                 <div key={item.id} className={`relative p-5 pt-6 bg-white border rounded-xl shadow-sm ${item.isLocked ? 'border-l-4 border-l-blue-400 bg-blue-50/20' : 'border-gray-200'}`}>
@@ -418,10 +424,10 @@ export const HandoverForm: React.FC<HandoverFormProps> = ({ onSave, onCancel, pr
                                                     value={item.quantity} 
                                                     onChange={e => handleItemChange(item.id, 'quantity', Number(e.target.value))} 
                                                     className={`block w-full px-3 py-2 text-gray-900 border border-gray-300 rounded-l-lg shadow-sm sm:text-sm font-bold text-center ${isQtyDisabled ? 'bg-gray-100 cursor-not-allowed' : 'bg-white'}`}
-                                                    // FIX: Dynamic min and step to allow/disallow decimals correctly
                                                     min={minValue}
                                                     step={stepValue}
                                                     disabled={isQtyDisabled}
+                                                    onKeyDown={handleKeyDownIntegerOnly} // STRICT INTEGER
                                                 />
                                                 {isMeasurement ? (
                                                     <select 

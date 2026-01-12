@@ -82,7 +82,12 @@ export const RequestReviewModal: React.FC<RequestReviewModalProps> = ({ isOpen, 
     const maxQty = getMaxAllowedQty(itemId);
 
     if (field === "approvedQuantity") {
-      const numValue = value === "" ? NaN : Number(value); // FIX: Use Number to support decimals
+      // STRICT INTEGER LOGIC:
+      // Hanya izinkan angka, tolak input non-numeric yang lolos (walaupun onKeyDown sudah handle)
+      if (value !== '' && !/^\d+$/.test(value)) return;
+
+      const numValue = value === "" ? NaN : parseInt(value, 10); 
+      
       // Validasi: Tidak boleh negatif, tidak boleh melebihi maxQty (plafon tahap ini)
       if (!isNaN(numValue) && (numValue < 0 || numValue > maxQty)) return; 
     }
@@ -93,9 +98,6 @@ export const RequestReviewModal: React.FC<RequestReviewModalProps> = ({ isOpen, 
   const handleActionChange = (itemId: number, action: ItemAction) => {
     const maxQty = getMaxAllowedQty(itemId);
 
-    // FIX: Cegah pemilihan Partial jika kuantitas max saat ini hanya 1
-    // if (action === 'partial' && maxQty <= 1) return; // REMOVED: Allow partial for floats like 0.5
-
     setItemActions(prev => ({ ...prev, [itemId]: action }));
 
     let newQty = maxQty; 
@@ -103,8 +105,7 @@ export const RequestReviewModal: React.FC<RequestReviewModalProps> = ({ isOpen, 
     if (action === "reject") {
         newQty = 0;
     } else if (action === "partial") {
-        // Jika partial, set default ke nilai yang masuk akal (misal: 0 atau max/2)
-        // Kita set 0 agar user mengetik manual.
+        // Jika partial, set default ke 0 agar user mengetik manual.
         newQty = 0; 
     } else if (action === "approve") {
         // Jika klik penuh, kembalikan ke maxQty (sesuai tahap ini)
@@ -120,6 +121,13 @@ export const RequestReviewModal: React.FC<RequestReviewModalProps> = ({ isOpen, 
             reason: action === 'approve' ? '' : prev[itemId].reason
         } 
     }));
+  };
+
+  // STRICT INTEGER: Key Handler untuk memblokir input desimal dan negatif
+  const handleKeyDownIntegerOnly = (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (['.', ',', 'e', 'E', '-'].includes(e.key)) {
+          e.preventDefault();
+      }
   };
 
   const isSubmissionValid = useMemo(() => {
@@ -165,7 +173,11 @@ export const RequestReviewModal: React.FC<RequestReviewModalProps> = ({ isOpen, 
                 const final: Record<number, AdjustmentData> = {};
                 Object.keys(adjustments).forEach(id => {
                     const numId = parseInt(id, 10);
-                    final[numId] = { approvedQuantity: Number(adjustments[numId].approvedQuantity), reason: adjustments[numId].reason };
+                    // FORCE INTEGER saat submit
+                    final[numId] = { 
+                        approvedQuantity: Math.floor(Number(adjustments[numId].approvedQuantity)), 
+                        reason: adjustments[numId].reason 
+                    };
                 });
                 onConfirm(final);
               }} 
@@ -285,14 +297,15 @@ export const RequestReviewModal: React.FC<RequestReviewModalProps> = ({ isOpen, 
                     <div className="flex items-center justify-between mb-4">
                       <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Kuantitas Disetujui</label>
                       <div className="flex items-center gap-2">
-                        {/* Input Angka Manual untuk Presisi */}
+                        {/* Input Angka Manual - STRICT INTEGER ENFORCED */}
                         <input
                             type="number"
-                            step="0.1" // Allow decimals
+                            step="1" 
                             min="0"
                             max={maxQty}
                             value={adj?.approvedQuantity || ''}
                             onChange={e => handleAdjustmentChange(item.id, 'approvedQuantity', e.target.value)}
+                            onKeyDown={handleKeyDownIntegerOnly}
                             className="w-24 text-center text-2xl font-black text-tm-primary border-b-2 border-tm-primary/20 focus:border-tm-primary bg-transparent outline-none transition-all"
                             placeholder="0"
                         />

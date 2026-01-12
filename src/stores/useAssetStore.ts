@@ -52,9 +52,11 @@ interface AssetState {
   ) => Promise<{ success: boolean; errors: string[] }>;
 }
 
-// --- UTILITY: SAFE MATH FOR FLOATING POINT ---
-const safeRound = (num: number): number => {
-    return Math.round((num + Number.EPSILON) * 10000) / 10000;
+// --- UTILITY: INTEGER ENFORCEMENT ---
+// Force Integer. Untuk stok fisik/uang gunakan Round/Floor. Untuk konsumsi gunakan Ceil (Safety).
+const toInt = (num: number | undefined | null): number => {
+    if (num === undefined || num === null) return 0;
+    return Math.round(num); // Standard rounding for general numbers
 };
 
 const sanitizeBulkAsset = (asset: Asset | Partial<Asset>, categories: AssetCategory[], existingAsset?: Asset): Asset | Partial<Asset> => {
@@ -115,9 +117,15 @@ export const useAssetStore = create<AssetState>()(
       addAsset: async (rawAsset) => {
         const asset = sanitizeBulkAsset(rawAsset, get().categories) as Asset;
         
+        // STRICT INTEGER ENFORCEMENT ON BALANCE
         if ((rawAsset as any).initialBalance !== undefined) {
-             asset.initialBalance = (rawAsset as any).initialBalance;
-             asset.currentBalance = (rawAsset as any).currentBalance ?? (rawAsset as any).initialBalance;
+             asset.initialBalance = toInt((rawAsset as any).initialBalance);
+             asset.currentBalance = toInt((rawAsset as any).currentBalance ?? (rawAsset as any).initialBalance);
+        }
+
+        // STRICT INTEGER ON QUANTITY (For Bulk Count)
+        if ((rawAsset as any).quantity) {
+            (asset as any).quantity = toInt((rawAsset as any).quantity);
         }
 
         const current = get().assets;
@@ -154,6 +162,14 @@ export const useAssetStore = create<AssetState>()(
         if (!originalAsset) return;
 
         const data = sanitizeBulkAsset(rawData, get().categories, originalAsset);
+        
+        // STRICT INTEGER ENFORCEMENT
+        if (data.currentBalance !== undefined) {
+            data.currentBalance = toInt(data.currentBalance);
+        }
+        if (data.initialBalance !== undefined) {
+            data.initialBalance = toInt(data.initialBalance);
+        }
         
         const updated = current.map(a => a.id === id ? { ...a, ...data } : a);
         await api.updateData('app_assets', updated);
@@ -283,7 +299,12 @@ export const useAssetStore = create<AssetState>()(
       },
 
       recordMovement: async (movementData) => {
-          const updatedMovements = await api.recordStockMovement(movementData);
+          // STRICT INTEGER ON MOVEMENT
+          const finalMovement = {
+              ...movementData,
+              quantity: toInt(movementData.quantity)
+          };
+          const updatedMovements = await api.recordStockMovement(finalMovement);
           set({ stockMovements: updatedMovements as StockMovement[] });
       },
 
@@ -297,6 +318,9 @@ export const useAssetStore = create<AssetState>()(
           const assets = get().assets;
           const categories = get().categories;
           const requests = useRequestStore.getState().requests;
+          
+          // Ensure Integer inputs
+          const qtyNeededInt = Math.ceil(qtyNeeded);
           
           let isMeasurement = false;
           let containerUnit = 'Unit';
@@ -338,7 +362,7 @@ export const useAssetStore = create<AssetState>()(
           }
 
           const totalPhysicalCount = allPhysicalAssets.length;
-          const totalPhysicalContent = safeRound(allPhysicalAssets.reduce((sum, a) => sum + (a.currentBalance ?? 0), 0));
+          const totalPhysicalContent = toInt(allPhysicalAssets.reduce((sum, a) => sum + (a.currentBalance ?? 0), 0));
 
           const activeRequests = requests.filter(r => 
               r.id !== excludeRequestId &&
@@ -353,7 +377,7 @@ export const useAssetStore = create<AssetState>()(
               matchingItems.forEach(item => {
                   const status = req.itemStatuses?.[item.id];
                   if (status?.status === 'stock_allocated') {
-                      const qty = status.approvedQuantity ?? item.quantity;
+                      const qty = toInt(status.approvedQuantity ?? item.quantity);
                       const itemUnit = item.unit || 'Unit';
                       
                       if (isMeasurement) {
@@ -369,7 +393,7 @@ export const useAssetStore = create<AssetState>()(
               });
           });
           
-          reservedContent = safeRound(reservedContent);
+          reservedContent = toInt(reservedContent);
 
           const availableCount = Math.max(0, effectivePhysicalAssets.length - reservedCount);
           
@@ -386,7 +410,7 @@ export const useAssetStore = create<AssetState>()(
           const assetsAvailableForAllocation = sortedAssets.slice(reservedCount);
           
           const rawAvailableContentSum = assetsAvailableForAllocation.reduce((sum, a) => sum + (a.currentBalance ?? 0), 0);
-          const availableContent = Math.max(0, safeRound(rawAvailableContentSum - reservedContent));
+          const availableContent = Math.max(0, toInt(rawAvailableContentSum - reservedContent));
 
           let isSufficient = false;
           let isFragmented = false;
@@ -394,11 +418,11 @@ export const useAssetStore = create<AssetState>()(
 
           if (isMeasurement) {
               if (isRequestingContainer) {
-                  isSufficient = availableCount >= qtyNeeded;
-                  recommendedSourceIds = assetsAvailableForAllocation.slice(0, qtyNeeded).map(a => a.id);
+                  isSufficient = availableCount >= qtyNeededInt;
+                  recommendedSourceIds = assetsAvailableForAllocation.slice(0, qtyNeededInt).map(a => a.id);
               } else {
-                  isSufficient = availableContent >= qtyNeeded;
-                  const perfectFit = assetsAvailableForAllocation.find(a => (a.currentBalance ?? 0) >= qtyNeeded);
+                  isSufficient = availableContent >= qtyNeededInt;
+                  const perfectFit = assetsAvailableForAllocation.find(a => (a.currentBalance ?? 0) >= qtyNeededInt);
                   
                   if (!perfectFit && isSufficient) {
                       isFragmented = true;
@@ -409,15 +433,15 @@ export const useAssetStore = create<AssetState>()(
                   } else {
                       let accumulated = 0;
                       for (const a of assetsAvailableForAllocation) {
-                          if (accumulated >= qtyNeeded) break;
+                          if (accumulated >= qtyNeededInt) break;
                           recommendedSourceIds.push(a.id);
                           accumulated += (a.currentBalance ?? 0);
                       }
                   }
               }
           } else {
-              isSufficient = availableCount >= qtyNeeded;
-              recommendedSourceIds = assetsAvailableForAllocation.slice(0, qtyNeeded).map(a => a.id);
+              isSufficient = availableCount >= qtyNeededInt;
+              recommendedSourceIds = assetsAvailableForAllocation.slice(0, qtyNeededInt).map(a => a.id);
           }
 
           return {
@@ -481,8 +505,13 @@ export const useAssetStore = create<AssetState>()(
                   if (isMeasurement) break;
               }
 
+              // STRICT INTEGER: Material Consumption via Form must be integer
+              // However, if we want to support partial meters in field but integer in warehouse,
+              // we should apply CEILING here to be safe (Expense-off principle).
+              // If tech used 0.5m, we deduct 1m.
+              const qtyToDeduct = Math.ceil(mat.quantity);
+
               let targetAssets: Asset[] = [];
-              let isExplicitSelection = false;
 
               // 1. Try Specific ID
               if (mat.materialAssetId) {
@@ -493,7 +522,6 @@ export const useAssetStore = create<AssetState>()(
                       specificAsset.status === AssetStatus.IN_USE
                   )) {
                       targetAssets = [specificAsset];
-                      isExplicitSelection = true;
                   } else {
                        errors.push(`Stok spesifik ${mat.materialAssetId} (${mat.itemName}) tidak valid/ditemukan.`);
                        continue; 
@@ -531,7 +559,7 @@ export const useAssetStore = create<AssetState>()(
               }
 
               if (isMeasurement) {
-                  let remainingNeed = mat.quantity;
+                  let remainingNeed = qtyToDeduct;
                   
                   for (const asset of targetAssets) {
                       if (remainingNeed <= 0) break;
@@ -550,7 +578,7 @@ export const useAssetStore = create<AssetState>()(
                       const updates: Partial<Asset> = {};
 
                       if (currentEffectiveBalance > remainingNeed) {
-                          const newBalance = safeRound(currentEffectiveBalance - remainingNeed);
+                          const newBalance = toInt(currentEffectiveBalance - remainingNeed);
                           updates.currentBalance = newBalance;
                           tempBalances[asset.id] = newBalance;
                           usedAmount = remainingNeed;
@@ -560,8 +588,8 @@ export const useAssetStore = create<AssetState>()(
                           updates.status = AssetStatus.CONSUMED;
                           tempBalances[asset.id] = 0;
                           
-                          usedAmount = safeRound(currentEffectiveBalance);
-                          remainingNeed = safeRound(remainingNeed - currentEffectiveBalance);
+                          usedAmount = toInt(currentEffectiveBalance);
+                          remainingNeed = toInt(remainingNeed - currentEffectiveBalance);
                       }
                       
                       plan.push({
@@ -587,9 +615,9 @@ export const useAssetStore = create<AssetState>()(
                   }
               } else {
                   // Count Logic
-                  const qtyToConsume = Math.min(mat.quantity, targetAssets.length);
-                  if (qtyToConsume < mat.quantity) {
-                       errors.push(`Stok fisik ${mat.itemName} kurang ${mat.quantity - qtyToConsume} ${mat.unit}.`);
+                  const qtyToConsume = Math.min(qtyToDeduct, targetAssets.length);
+                  if (qtyToConsume < qtyToDeduct) {
+                       errors.push(`Stok fisik ${mat.itemName} kurang ${qtyToDeduct - qtyToConsume} ${mat.unit}.`);
                   } else {
                       const itemsToUpdate = targetAssets.slice(0, qtyToConsume);
                       for (const item of itemsToUpdate) {
