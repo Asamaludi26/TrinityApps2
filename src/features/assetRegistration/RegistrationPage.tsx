@@ -23,8 +23,8 @@ import { EyeIcon } from '../../components/icons/EyeIcon';
 import { CloseIcon } from '../../components/icons/CloseIcon';
 import { InboxIcon } from '../../components/icons/InboxIcon';
 import { TrashIcon } from '../../components/icons/TrashIcon';
-import { QrCodeIcon } from '../../components/icons/QrCodeIcon'; // Added import
-import { BulkLabelModal } from './components/BulkLabelModal'; // Added import
+import { QrCodeIcon } from '../../components/icons/QrCodeIcon';
+import { BulkLabelModal } from './components/BulkLabelModal';
 
 // Components
 import { RegistrationForm } from './components/RegistrationForm';
@@ -193,7 +193,7 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
     // State
     const [view, setView] = useState<'list' | 'form'>('list');
     const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
-    const [isBulkLabelModalOpen, setIsBulkLabelModalOpen] = useState(false); // New Modal State
+    const [isBulkLabelModalOpen, setIsBulkLabelModalOpen] = useState(false); 
     
     // Modals state for Type/Model management
     const [modelModalState, setModelModalState] = useState<{ isOpen: boolean; category: AssetCategory | null; type: AssetType | null }>({ isOpen: false, category: null, type: null });
@@ -201,8 +201,6 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
 
     // Filter/Sort/Search state
     const [searchQuery, setSearchQuery] = useState('');
-    
-    // State Filter Logic
     const initialFilterState = { category: '', status: '', condition: '' };
     const [filters, setFilters] = useState(initialFilterState);
     const [tempFilters, setTempFilters] = useState(filters);
@@ -268,7 +266,7 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
     const handleApplyFilters = () => {
         setFilters(tempFilters);
         setIsFilterPanelOpen(false);
-        setCurrentPage(1); // Reset page on filter
+        setCurrentPage(1); 
     };
 
     const handleResetFilters = () => {
@@ -288,7 +286,6 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
     const conditionFilterOptions = Object.values(AssetCondition).map(c => ({ value: c, label: c }));
 
     // Handlers
-    
     const handleSave = async (data: RegistrationFormData, assetIdToUpdate?: string) => {
         if (assetIdToUpdate) {
             const updates: Partial<Asset> = {
@@ -310,7 +307,6 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
                 notes: data.notes,
                 serialNumber: data.bulkItems[0]?.serialNumber, 
                 macAddress: data.bulkItems[0]?.macAddress,
-                // --- FIX: Ensure balances are updated on edit if needed
                 initialBalance: data.bulkItems[0]?.initialBalance,
                 currentBalance: data.bulkItems[0]?.currentBalance,
             };
@@ -318,8 +314,17 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
             addNotification(`Aset ${data.assetName} berhasil diperbarui.`, 'success');
         } else {
             // Create New Asset(s)
+            // PROFESSIONAL LOGIC: 
+            // 1. Split Bulk items into individual rows (User Request).
+            // 2. Ensure each split item has quantity = 1 (Data Normalization for Individual Tracking).
             const newAssets: Asset[] = data.bulkItems.map((item, index) => {
                 const generatedId = `AST-${new Date().getFullYear()}${String(new Date().getMonth()+1).padStart(2,'0')}-${String(Math.floor(Math.random()*10000)).padStart(4,'0')}-${index}`;
+                
+                // For measurement type (Cable), quantity is handled by 'initialBalance'. 
+                // For count type (Connector) that is split, each row represents 1 unit.
+                // If it is a container (e.g. 1 Box), quantity is 1.
+                // Safe default: 1.
+                const itemQuantity = 1;
 
                 return {
                     id: generatedId,
@@ -353,48 +358,33 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
                         referenceId: data.relatedRequestId || undefined
                     }],
                     woRoIntNumber: data.relatedRequestId,
-                    // --- FIX: Include Measurement Balances & Count Quantities
+                    
+                    // Measurement Fields
                     initialBalance: item.initialBalance,
                     currentBalance: item.currentBalance,
                     
-                    // --- NEW: Handle Bulk Count (Material) Logic at Add Asset Level
-                    // Jika data.quantity digunakan untuk store quantity pada asset bulk/count
-                    // addAsset akan menangani ini (via recordMovement / update).
-                    // Disini kita passing data mentah yang diperlukan store.
-                    ...(data.bulkItems.length === 1 && data.quantity ? { quantity: Number(data.quantity) } : {}) 
+                    // Explicitly set quantity to 1 for normalized tracking
+                    quantity: itemQuantity
                 };
             });
 
-            for (const asset of newAssets) {
-                await addAsset(asset);
-            }
+            // Optimistic Batch Update (Parallel Promises)
+            await Promise.all(newAssets.map(asset => addAsset(asset)));
 
             if (data.relatedRequestId && prefillData?.itemToRegister) {
-                // FIX: Kalkulasi jumlah yang didaftarkan ke Request
-                // Jika tipe adalah Bulk Count (misal Connector), newAssets.length hanya 1 (dummy asset).
-                // Kita harus melaporkan 'data.quantity' yang sebenarnya.
-                
-                let registeredCount = newAssets.length;
-                
-                // Deteksi jika ini adalah Bulk Count
-                const categoryObj = categories.find(c => c.name === data.category);
-                const typeObj = categoryObj?.types.find(t => t.name === data.type);
-                // Check if Bulk AND Not Measurement (means Count)
-                const isBulkCount = typeObj?.trackingMethod === 'bulk' && 
-                                    typeObj.standardItems?.find(m => m.name === data.assetName)?.bulkType !== 'measurement';
-
-                if (isBulkCount) {
-                    registeredCount = Number(data.quantity);
-                }
+                // Determine the total count to report back to the Request
+                // Since we split items, the number of generated assets IS the count.
+                // Exception: Measurement items (e.g. 1 Drum) are 1 asset, count is 1.
+                const registeredCount = newAssets.length;
 
                 await updateRequestRegistration(data.relatedRequestId, prefillData.itemToRegister.id, registeredCount);
                 
-                // REDIRECT FIX: Go back to Request Detail page after registration
+                // REDIRECT: Go back to Request Detail page after registration
                 setActivePage('request', { openDetailForId: data.relatedRequestId });
-                return; // Stop here, don't execute the rest of the function (setView list)
+                return; 
             }
 
-            addNotification(`${newAssets.length > 1 ? newAssets.length : (data.quantity || 1)} aset berhasil didaftarkan.`, 'success');
+            addNotification(`${newAssets.length} aset berhasil didaftarkan.`, 'success');
         }
         
         setView('list');
@@ -405,8 +395,6 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
 
     const handleStartScan = (itemId: number) => {
         setScanContext('form');
-        // This relies on the RegistrationForm's own callback handler now.
-        // But for Global Scanner visibility:
         setIsGlobalScannerOpen(true);
     };
 
@@ -430,7 +418,6 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
         setSelectedAssetIds(prev => prev.includes(id) ? prev.filter(aid => aid !== id) : [...prev, id]);
     };
     
-    // Calculate selected assets for bulk print modal
     const selectedAssetsForPrint = useMemo(() => {
         return assets.filter(a => selectedAssetIds.includes(a.id));
     }, [assets, selectedAssetIds]);
@@ -461,7 +448,6 @@ const ItemRegistration: React.FC<ItemRegistrationProps> = (props) => {
                         setActivePage={setActivePage}
                         openModelModal={(c, t) => setModelModalState({ isOpen: true, category: c, type: t })}
                         openTypeModal={(c, t) => setTypeModalState({ isOpen: true, category: c, typeToEdit: t })}
-                        // Scanner Props
                         onStartScan={handleStartScan}
                         setFormScanCallback={setFormScanCallback}
                     />
