@@ -11,7 +11,7 @@ import { QrCodeIcon } from '../../../components/icons/QrCodeIcon';
 import { TrashIcon } from '../../../components/icons/TrashIcon';
 import { ExclamationTriangleIcon } from '../../../components/icons/ExclamationTriangleIcon';
 import { PaperclipIcon } from '../../../components/icons/PaperclipIcon';
-import { BsRulers, BsLightningFill, BsPlusLg, BsCalculator, BsArrowRight } from 'react-icons/bs';
+import { BsRulers, BsLightningFill, BsPlusLg, BsCalculator, BsArrowRight, BsHash } from 'react-icons/bs';
 
 interface SectionProps {
     formData: RegistrationFormData;
@@ -207,13 +207,17 @@ export const TrackingSection: React.FC<TrackingSectionProps> = ({
     generateMeasurementItems, currentStockCount
 }) => {
     // Determine labels and modes based on Model if available, else Type
-    const isBulkMode = selectedType?.trackingMethod === 'bulk' && !isEditing;
     const modelUnit = selectedModel?.unitOfMeasure || selectedType?.unitOfMeasure || 'Unit';
     const unitLabel = modelUnit;
     
     // Check if bulk type is measurement (e.g. Cable)
-    const isMeasurementType = isBulkMode && (selectedModel?.bulkType === 'measurement');
+    const isMeasurementType = selectedModel?.bulkType === 'measurement';
     const baseUnit = selectedModel?.baseUnitOfMeasure || 'Satuan';
+
+    // LOGIC MODIFICATION:
+    // "Bulk Mode" (Single Input UI) ONLY applies if it is a Measurement type.
+    // If it's a Count type (e.g. Connector), we treat it as Individual UI to allow splitting into rows.
+    const isBulkMode = selectedType?.trackingMethod === 'bulk' && isMeasurementType && !isEditing;
 
     // Local state for batch generation
     const [genQty, setGenQty] = useState<number>(1);
@@ -235,6 +239,9 @@ export const TrackingSection: React.FC<TrackingSectionProps> = ({
             e.preventDefault();
         }
     };
+    
+    // CHECK IF THIS IS A "COUNT" TYPE (Bulk but not Measurement)
+    const isCountType = selectedType?.trackingMethod === 'bulk' && !isMeasurementType;
 
     return (
         <FormSection title="Detail Unit Aset" icon={<InfoIcon className="w-6 h-6 mr-3 text-tm-primary" />} className="md:col-span-2">
@@ -257,13 +264,44 @@ export const TrackingSection: React.FC<TrackingSectionProps> = ({
                                 <label className="block text-sm font-medium text-gray-700">Daftar Unit (Nomor Seri & MAC Address)</label>
                                 {!isEditing && <button type="button" onClick={addBulkItem} className="px-3 py-1 text-xs font-semibold text-white transition-colors duration-200 rounded-md shadow-sm bg-tm-accent hover:bg-tm-primary">+ Tambah {unitLabel}</button>}
                             </div>
+                            
+                            {/* Alert khusus untuk Count Type */}
+                            {isCountType && (
+                                <div className="mb-4 p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-700 flex items-center gap-2">
+                                    <InfoIcon className="w-4 h-4"/>
+                                    <span>Item ini adalah <strong>Material Massal (Count)</strong>. Sistem akan menghasilkan ID unik untuk setiap baris, tetapi Nomor Seri & MAC Address tidak diperlukan.</span>
+                                </div>
+                            )}
+
                             <div className="space-y-3">
                                 {formData.bulkItems.map((item, index) => (
                                     <div key={item.id} className="relative grid grid-cols-1 md:grid-cols-10 gap-x-4 gap-y-2 p-3 bg-gray-50/80 border rounded-lg">
                                         <div className="md:col-span-10"><label className="text-sm font-medium text-gray-700">{isEditing ? `Detail ${unitLabel}` : `${unitLabel} #${index + 1}`}</label></div>
-                                        <div className="md:col-span-4"><label className="block text-xs font-medium text-gray-500">Nomor Seri <span className="text-red-500">*</span></label><input type="text" value={item.serialNumber} onChange={(e) => updateBulkItem(item.id, 'serialNumber', e.target.value)} required={!isEditing} className="block w-full px-3 py-2 mt-1 text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm sm:text-sm" placeholder="Wajib diisi" /></div>
-                                        <div className="md:col-span-4"><label className="block text-xs font-medium text-gray-500">MAC Address</label><input type="text" value={item.macAddress} onChange={(e) => updateBulkItem(item.id, 'macAddress', e.target.value)} className="block w-full px-3 py-2 mt-1 text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm sm:text-sm" placeholder="Opsional" /></div>
-                                        <div className="md:col-span-1 flex items-end justify-start md:justify-center"><button type="button" onClick={() => onStartScan(item.id)} className="flex items-center justify-center w-full h-10 px-3 text-gray-600 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-100 hover:text-tm-primary" title="Pindai SN/MAC"><QrCodeIcon className="w-5 h-5"/></button></div>
+                                        
+                                        {/* CONDITIONAL RENDERING BASED ON TYPE */}
+                                        {isCountType ? (
+                                            <div className="md:col-span-8 flex items-center h-10 px-3 bg-gray-100 border border-gray-200 rounded-md text-sm text-gray-500 italic mt-1">
+                                                <BsHash className="w-4 h-4 mr-2"/>
+                                                ID Sistem Otomatis (Material Tanpa SN)
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <div className="md:col-span-4">
+                                                    <label className="block text-xs font-medium text-gray-500">Nomor Seri <span className="text-red-500">*</span></label>
+                                                    <input 
+                                                        type="text" 
+                                                        value={item.serialNumber} 
+                                                        onChange={(e) => updateBulkItem(item.id, 'serialNumber', e.target.value)} 
+                                                        required={!isEditing} 
+                                                        className="block w-full px-3 py-2 mt-1 text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm sm:text-sm" 
+                                                        placeholder="Wajib diisi" 
+                                                    />
+                                                </div>
+                                                <div className="md:col-span-4"><label className="block text-xs font-medium text-gray-500">MAC Address</label><input type="text" value={item.macAddress} onChange={(e) => updateBulkItem(item.id, 'macAddress', e.target.value)} className="block w-full px-3 py-2 mt-1 text-gray-900 bg-white border border-gray-300 rounded-md shadow-sm sm:text-sm" placeholder="Opsional" /></div>
+                                                <div className="md:col-span-1 flex items-end justify-start md:justify-center"><button type="button" onClick={() => onStartScan(item.id)} className="flex items-center justify-center w-full h-10 px-3 text-gray-600 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-100 hover:text-tm-primary" title="Pindai SN/MAC"><QrCodeIcon className="w-5 h-5"/></button></div>
+                                            </>
+                                        )}
+                                        
                                         {formData.bulkItems.length > 1 && !isEditing && (<div className="md:col-span-1 flex items-end justify-center"><button type="button" onClick={() => removeBulkItem(item.id)} className="w-10 h-10 flex items-center justify-center text-gray-400 rounded-full hover:bg-red-100 hover:text-red-500 border border-transparent hover:border-red-200"><TrashIcon className="w-4 h-4" /></button></div>)}
                                     </div>
                                 ))}
@@ -378,50 +416,9 @@ export const TrackingSection: React.FC<TrackingSectionProps> = ({
                             </div>
                         </div>
                     ) : (
-                        /* Logic untuk Tipe COUNT (Konektor, dll) */
-                        <div className="md:col-span-2 space-y-6">
-                             <div className="p-4 -mt-2 border-l-4 rounded-r-lg bg-info-light border-tm-primary">
-                                <div className="flex items-start gap-3">
-                                    <BsLightningFill className="flex-shrink-0 w-5 h-5 mt-1 text-info-text" />
-                                    <div className="text-sm text-info-text">
-                                        <p className="font-semibold">Mode Pencatatan Massal (Direct Count)</p>
-                                        <p>Item ini tidak dilacak per unit unik (SN). Sistem hanya akan menambahkan jumlah stok ke total inventory.</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-2">Jumlah Penambahan Stok ({unitLabel})</label>
-                                    <div className="relative">
-                                        <input 
-                                            type="number" 
-                                            value={formData.quantity} 
-                                            onChange={(e) => updateField('quantity', e.target.value === '' ? '' : parseInt(e.target.value, 10))} 
-                                            min="1" 
-                                            step="1"
-                                            required 
-                                            onKeyDown={handleKeyDownInteger}
-                                            className="block w-full py-3 px-4 text-xl font-bold text-tm-primary bg-gray-50 border border-gray-300 rounded-lg shadow-inner focus:ring-tm-primary focus:border-tm-primary" 
-                                        />
-                                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold text-gray-400 pointer-events-none">{unitLabel}</span>
-                                    </div>
-                                </div>
-                                
-                                <div className="flex items-center gap-4 text-sm text-gray-600 bg-gray-50 p-4 rounded-lg">
-                                    <div>
-                                        <span className="block text-xs uppercase font-bold text-gray-400">Stok Saat Ini</span>
-                                        <span className="text-lg font-bold text-gray-800">{currentStockCount || 0}</span>
-                                    </div>
-                                    <BsArrowRight className="text-gray-400 w-5 h-5" />
-                                    <div>
-                                        <span className="block text-xs uppercase font-bold text-gray-400">Estimasi Total</span>
-                                        <span className="text-lg font-bold text-success-text">
-                                            {(currentStockCount || 0) + (Number(formData.quantity) || 0)}
-                                        </span>
-                                    </div>
-                                </div>
-                            </div>
+                         /* Logic untuk Tipe COUNT (Konektor, dll) - SHOULD NOT BE REACHED if isBulkMode logic is correct */
+                         <div className="md:col-span-2 space-y-6">
+                            <p>Error: Logic Fallback</p>
                         </div>
                     )}
                 </>

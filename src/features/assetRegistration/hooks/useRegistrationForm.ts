@@ -182,7 +182,12 @@ export const useRegistrationForm = ({
                         }];
                     }
                 } else if (isCount) {
-                     initialBulkItems = [{ id: generateUUID(), serialNumber: '', macAddress: '' }];
+                     // LOGIC UPDATE: Treat Count like Individual (Split into rows)
+                     initialBulkItems = Array.from({ length: quantityToRegister }, () => ({ 
+                         id: generateUUID(), 
+                         serialNumber: '', // User fill manual (but ignored later for material)
+                         macAddress: '' 
+                     }));
                      finalQuantity = quantityToRegister;
                 }
             } else {
@@ -399,20 +404,32 @@ export const useRegistrationForm = ({
                       return;
                  }
              } else {
+                 // For Count types: We treat them as individual rows in UI, so check if list exists
                  if (finalBulkItems.length === 0) {
                      finalBulkItems = [{ id: generateUUID(), serialNumber: '', macAddress: '' }];
                  }
              }
-        } else {
+        }
+        
+        // Validation for Serial Numbers (Skip for pure bulk/count unless users entered rows)
+        // If it's a Count type but we have multiple rows, user implies tracking.
+        // We make SN optional for "Count" type to keep flexibility.
+        const isCountType = isBulkTracking && !isMeasurementType;
+        if (!isCountType) {
              if (finalBulkItems.some(i => !i.serialNumber.trim())) {
-                 addNotification('Nomor Seri wajib diisi untuk semua unit.', 'error');
+                 addNotification('Nomor Seri wajib diisi untuk semua unit (Kecuali Tipe Massal).', 'error');
                  return;
              }
         }
         
         const finalData: RegistrationFormData = {
             ...formData,
-            bulkItems: finalBulkItems,
+            // Ensure bulkItems reflect "Count" nature if applicable
+            bulkItems: finalBulkItems.map(item => ({
+                ...item,
+                // If it is a count type, force reset quantity and balance to 1 for each individual row
+                ...(isCountType ? { initialBalance: 1, currentBalance: 1 } : {})
+            })),
             purchasePrice: formData.purchasePrice ? Number(formData.purchasePrice) : null,
             quantity: quantityNum
         };
