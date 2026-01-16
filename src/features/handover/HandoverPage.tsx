@@ -126,7 +126,7 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
             // 1. Simpan Dokumen Handover
             await addHandover(newHandover);
 
-            // 2. INTELLIGENT ASSET UPDATE
+            // 2. INTELLIGENT ASSET UPDATE & SPLITTING
             const freshAssets = useAssetStore.getState().assets;
             const assetsToMoveIds: string[] = [];
 
@@ -154,21 +154,20 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
                     const requestedUnit = item.unit || containerUnit;
                     const isWholeMove = requestedUnit === containerUnit;
                     
-                    // KASUS A: Pengambilan Eceran / Potongan (Base Unit)
+                    // KASUS A: Pengambilan Eceran / Potongan (Base Unit) -> Create Child Asset
                     if (!isWholeMove) {
                         const qtyTaken = item.quantity;
                         const currentBalance = parentAsset.currentBalance || 0;
                         
                         const newBalance = Math.max(0, safeRound(currentBalance - qtyTaken));
                         
-                        // A. Kurangi stok induk di Gudang
+                        // A. Kurangi stok induk di Gudang (Tanpa pindah lokasi)
                         await updateAsset(parentAsset.id, {
                             currentBalance: newBalance,
                         });
 
                         // B. Buat "Child Asset" (Potongan) untuk Penerima
-                        // FIX: Generate clean ID to prevent recursion (-PART-PART-...)
-                        // Use original base ID if possible, otherwise just use UUID
+                        // Format ID: ASAL-PART-TIMESTAMP (Untuk tracking lineage)
                         const baseId = parentAsset.id.split('-PART-')[0];
                         const childAssetId = `${baseId}-PART-${Date.now().toString().slice(-6)}`;
                         
@@ -179,13 +178,13 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
                             macAddress: undefined,
                             
                             name: `${parentAsset.name} (Potongan)`,
-                            initialBalance: qtyTaken, // Kapasitas potongan ini
+                            initialBalance: qtyTaken, // Kapasitas potongan ini adalah jumlah yang diambil
                             currentBalance: qtyTaken, // Masih utuh saat diterima
                             
-                            status: targetStatus, // IN_CUSTODY / IN_USE
+                            status: targetStatus, // IN_CUSTODY (umumnya)
                             currentUser: data.penerima,
                             location: `Dipegang: ${data.penerima}`,
-                            locationDetail: 'Pecahan dari handover',
+                            locationDetail: `Pecahan dari ${parentAsset.id}`,
                             
                             registrationDate: new Date().toISOString(),
                             recordedBy: currentUser.name,
@@ -209,16 +208,16 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
                             quantity: qtyTaken,
                             referenceId: newHandover.docNumber,
                             actor: currentUser.name,
-                            notes: `Handover parsial ke ${data.penerima}. Sisa induk: ${newBalance} ${baseUnit}.`
+                            notes: `Handover parsial (Child ID: ${childAssetId}) ke ${data.penerima}. Sisa induk: ${newBalance} ${baseUnit}.`
                         });
                         
                     } 
-                    // KASUS B: Pengambilan Total / Fisik (Container Unit)
+                    // KASUS B: Pengambilan Total / Fisik (Container Unit) -> Move Whole Asset
                     else {
                         assetsToMoveIds.push(parentAsset.id);
                     }
                 } else {
-                    // KASUS C: Aset Unit Biasa (Laptop/Device)
+                    // KASUS C: Aset Unit Biasa (Laptop/Device) -> Move Asset
                     assetsToMoveIds.push(parentAsset.id);
                 }
             }
@@ -231,7 +230,6 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
                         ? `Dipegang oleh ${data.penerima} (Custody)`
                         : `Digunakan oleh ${data.penerima}`;
 
-                // REFACTOR FIX: Gunakan docNumber sebagai referenceId (argumen ke-3)
                 await updateAssetBatch(assetsToMoveIds, {
                     status: targetStatus,
                     currentUser: targetStatus === AssetStatus.IN_STORAGE ? null : data.penerima,
@@ -242,19 +240,14 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
             // 4. Update Source Document Status (Request / Loan)
             if (newHandover.woRoIntNumber) {
                 if (newHandover.woRoIntNumber.startsWith('RL-') || newHandover.woRoIntNumber.startsWith('LREQ-')) {
-                    if (targetStatus === AssetStatus.IN_USE || targetStatus === AssetStatus.IN_CUSTODY) {
-                         await updateLoanRequest(newHandover.woRoIntNumber, {
-                            status: LoanRequestStatus.ON_LOAN,
-                            handoverId: newHandover.id,
-                        });
-                    }
+                     // Jika untuk peminjaman, status Loan jadi ON_LOAN
+                     await updateLoanRequest(newHandover.woRoIntNumber, {
+                        status: LoanRequestStatus.ON_LOAN,
+                        handoverId: newHandover.id,
+                    });
                 } 
                 else if (newHandover.woRoIntNumber.startsWith('RO-') || newHandover.woRoIntNumber.startsWith('REQ-')) {
-                     // Check remaining stock logic (simplified)
-                     const refetchedAssets = useAssetStore.getState().assets;
-                     const allAssetsForRequest = refetchedAssets.filter(a => a.woRoIntNumber === newHandover.woRoIntNumber);
-                     const remainingInStorage = allAssetsForRequest.filter(a => a.status === AssetStatus.IN_STORAGE && (a.currentBalance || 0) > 0);
-                     
+                     // Jika untuk Request Baru, status Request jadi COMPLETED
                      await updateRequest(newHandover.woRoIntNumber, {
                          status: ItemStatus.COMPLETED,
                          completionDate: new Date().toISOString(),
@@ -373,7 +366,7 @@ const ItemHandoverPage: React.FC<ItemHandoverPageProps> = (props) => {
     );
 
     return (
-        <div className={view === 'form' ? 'pb-24' : ''}>
+        <div className="view-container">
             {view === 'list' && renderList()}
             
             {view === 'form' && (

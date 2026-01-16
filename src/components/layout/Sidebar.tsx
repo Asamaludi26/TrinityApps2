@@ -102,33 +102,25 @@ const NavLink: React.FC<{
 }> = ({ item, activePage, onClick, isSubmenu = false }) => {
   const pageId = item.page || (item.id as Page);
   const isActive = activePage === pageId;
-  const baseClasses = 'relative flex items-center px-4 py-2.5 my-1 rounded-md text-sm font-medium transition-colors duration-200 group';
-  const activeClasses = 'bg-gray-700/60 text-white';
-  const inactiveClasses = 'text-gray-400 hover:bg-gray-700/40 hover:text-white';
+  
+  // Design Update: Cleaner hover states and active indicator
+  const baseClasses = 'relative flex items-center px-4 py-2.5 my-1 rounded-lg text-sm font-medium transition-all duration-200 group';
+  const activeClasses = 'bg-white/10 text-white shadow-sm';
+  const inactiveClasses = 'text-slate-400 hover:bg-white/5 hover:text-slate-100';
 
   const linkContent = (
     <>
-        {isActive && !item.isExternal && <span className="absolute inset-y-0 left-0 w-1 bg-tm-accent rounded-r-full"></span>}
-        <item.icon className={`flex-shrink-0 w-5 h-5 mr-4 transition-colors group-hover:text-white ${isActive ? 'text-white' : 'text-gray-500'}`} />
-        <span>{item.label}</span>
+        {/* Active Indicator Strip */}
+        {isActive && !item.isExternal && (
+            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-tm-primary rounded-r-full shadow-[0_0_10px_rgba(37,99,235,0.6)]"></span>
+        )}
+        <item.icon className={`flex-shrink-0 w-5 h-5 mr-3 transition-colors ${isActive ? 'text-tm-primary' : 'text-slate-500 group-hover:text-slate-300'}`} />
+        <span className="tracking-wide">{item.label}</span>
         {item.isExternal && (
-            <svg className="w-4 h-4 ml-auto text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+            <svg className="w-4 h-4 ml-auto text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
         )}
     </>
   );
-
-  if (item.isExternal) {
-      return (
-          <a
-            href={item.path}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`${baseClasses} ${inactiveClasses}`}
-          >
-            {linkContent}
-          </a>
-      );
-  }
 
   return (
     <a
@@ -159,28 +151,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
     const storeToggleSidebar = useUIStore((state) => state.toggleSidebar);
     const storeUser = useAuthStore((state) => state.currentUser);
 
-    // Prioritize store state if available (hybrid mode)
-    // In a full migration, we would remove props completely.
     const activePage = storeActivePage;
     const currentUser = storeUser || propUser;
-    const isOpen = storeSidebarOpen; // Using store for open state sync
+    const isOpen = storeSidebarOpen; 
 
-    // Wrapper to handle both store and prop updates (for App.tsx compatibility)
     const handleSetActivePage = (page: Page, filters?: any) => {
         storeSetActivePage(page, filters);
-        propSetActivePage(page, filters); // Keep App.tsx in sync for now
+        propSetActivePage(page, filters); 
     };
 
     const handleSetIsOpen = (val: boolean) => {
         storeToggleSidebar(val);
-        propSetIsOpen(val); // Keep App.tsx in sync
+        propSetIsOpen(val); 
     };
 
     const [openMenus, setOpenMenus] = useState<Record<string, boolean>>(() => {
         const initialState: Record<string, boolean> = {};
         allMenuItems.forEach(item => {
             if (item.children) {
-                const childPages = item.children.map(c => c.page || c.id);
+                const childPages = item.children.flatMap(c => c.children ? c.children.map(gc => gc.page || gc.id) : [c.page || c.id]);
                 if (childPages.includes(activePage)) {
                     initialState[item.id] = true;
                 }
@@ -232,25 +221,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     const handleNavClick = (page: Page, filters?: Record<string, any>) => {
         handleSetActivePage(page, filters);
-        if(window.innerWidth < 768) { // close on mobile
+        if(window.innerWidth < 768) { 
             handleSetIsOpen(false);
         }
     };
     
     const SidebarContent = () => (
-        <div className="flex flex-col h-full">
-            <div className="flex items-center justify-between h-20 px-4 border-b border-gray-700/80">
+        // Design Update: Uses Slate-900 (tm-dark) with a subtle gradient hint
+        <div className="flex flex-col h-full bg-slate-900 text-slate-300 border-r border-slate-800 shadow-2xl">
+            {/* Header: Fixed Height & Branding */}
+            <div className="flex items-center justify-between h-16 px-6 border-b border-slate-800/50 flex-shrink-0 bg-slate-900/50 backdrop-blur-sm">
                 <div className="flex items-center gap-3">
-                    <TrinitiLogoIcon className="w-10 h-10 text-tm-accent" />
-                    <span className="text-xl font-bold tracking-wider text-white">
-                        Triniti<span className="font-normal opacity-75">Asset</span>
+                    <div className="relative">
+                        <TrinitiLogoIcon className="w-8 h-8 text-tm-primary drop-shadow-[0_0_8px_rgba(37,99,235,0.5)]" />
+                    </div>
+                    <span className="text-lg font-bold tracking-wider text-white font-display">
+                        Triniti<span className="font-light opacity-60">Asset</span>
                     </span>
                 </div>
-                <button onClick={() => handleSetIsOpen(false)} className="text-gray-400 md:hidden hover:text-white">
+                <button onClick={() => handleSetIsOpen(false)} className="text-slate-400 md:hidden hover:text-white p-1 rounded hover:bg-white/10 transition-colors">
                     <CloseIcon />
                 </button>
             </div>
-            <nav className="flex-1 p-3 overflow-y-auto dark-scrollbar">
+
+            {/* Navigation: Scrollable with flex-grow */}
+            <nav className="flex-1 overflow-y-auto dark-scrollbar p-4 min-h-0 space-y-1">
                 {menuItems.map((item) => {
                     if (!item.children || item.children.length === 0) {
                         return (
@@ -269,19 +264,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     );
 
                     return (
-                        <div key={item.id}>
+                        <div key={item.id} className="mb-1">
                             <button
                                 onClick={() => setOpenMenus(prev => ({...prev, [item.id]: !prev[item.id]}))}
-                                className={`flex items-center justify-between w-full px-4 py-2.5 my-1 rounded-md text-sm font-medium transition-colors duration-200 group focus:outline-none ${isParentActive ? 'text-white' : 'text-gray-400'} hover:bg-gray-700/40 hover:text-white`}
+                                className={`flex items-center justify-between w-full px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 group focus:outline-none ${isParentActive ? 'text-white bg-white/5' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
                             >
                                 <div className="flex items-center">
-                                    <item.icon className={`flex-shrink-0 w-5 h-5 mr-4 transition-colors group-hover:text-white ${isParentActive ? 'text-white' : 'text-gray-500'}`} />
-                                    <span className="flex-1 text-left">{item.label}</span>
+                                    <item.icon className={`flex-shrink-0 w-5 h-5 mr-3 transition-colors ${isParentActive ? 'text-tm-primary' : 'text-slate-500 group-hover:text-slate-300'}`} />
+                                    <span className="tracking-wide">{item.label}</span>
                                 </div>
-                                <ChevronDownIcon className={`w-5 h-5 transform transition-transform duration-200 ${openMenus[item.id] ? 'rotate-180' : 'rotate-0'}`} />
+                                <ChevronDownIcon className={`w-4 h-4 transform transition-transform duration-200 opacity-50 ${openMenus[item.id] ? 'rotate-180' : 'rotate-0'}`} />
                             </button>
-                            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${openMenus[item.id] ? 'max-h-96' : 'max-h-0'}`}>
-                                <div className="pt-1 pb-1 pl-6">
+                            <div className={`overflow-hidden transition-all duration-300 ease-in-out ${openMenus[item.id] ? 'max-h-[800px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                                <div className="pt-1 pb-1 pl-4 relative">
+                                    {/* Indentation line */}
+                                    <div className="absolute left-6 top-0 bottom-0 w-px bg-slate-800"></div>
                                     {item.children.map((child) => {
                                         if (!child.children || child.children.length === 0) {
                                             return (
@@ -298,19 +295,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         const isChildParentActive = child.children?.some(gc => (gc.page || gc.id) === activePage);
                                         
                                         return (
-                                            <div key={child.id}>
+                                            <div key={child.id} className="mt-1">
                                                 <button
                                                     onClick={() => setOpenMenus(prev => ({...prev, [child.id]: !prev[child.id]}))}
-                                                    className={`flex items-center justify-between w-full px-4 py-2.5 my-1 rounded-md text-sm font-medium transition-colors duration-200 group focus:outline-none ${isChildParentActive ? 'text-white' : 'text-gray-400'} hover:bg-gray-700/40 hover:text-white`}
+                                                    className={`flex items-center justify-between w-full px-4 py-2 rounded-lg text-xs font-medium transition-all duration-200 group focus:outline-none ${isChildParentActive ? 'text-white' : 'text-slate-400 hover:text-slate-200'}`}
                                                 >
                                                     <div className="flex items-center">
-                                                        <child.icon className={`flex-shrink-0 w-5 h-5 mr-4 transition-colors group-hover:text-white ${isChildParentActive ? 'text-white' : 'text-gray-500'}`} />
-                                                        <span className="flex-1 text-left">{child.label}</span>
+                                                        <child.icon className={`flex-shrink-0 w-4 h-4 mr-3 transition-colors ${isChildParentActive ? 'text-tm-primary' : 'text-slate-600 group-hover:text-slate-400'}`} />
+                                                        <span>{child.label}</span>
                                                     </div>
-                                                    <ChevronDownIcon className={`w-5 h-5 transform transition-transform duration-200 ${openMenus[child.id] ? 'rotate-180' : 'rotate-0'}`} />
+                                                    <ChevronDownIcon className={`w-3 h-3 transform transition-transform duration-200 ${openMenus[child.id] ? 'rotate-180' : 'rotate-0'}`} />
                                                 </button>
                                                 <div className={`overflow-hidden transition-all duration-300 ease-in-out ${openMenus[child.id] ? 'max-h-96' : 'max-h-0'}`}>
-                                                    <div className="pt-1 pb-1 pl-6">
+                                                    <div className="pt-1 pb-1 pl-4 border-l border-slate-800 ml-6">
                                                         {child.children.map((grandchild) => (
                                                              <NavLink
                                                                 key={grandchild.id}
@@ -331,8 +328,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     );
                 })}
             </nav>
-            <div className="p-4 border-t border-gray-700/80">
-                <p className="text-xs text-center text-gray-500">© 2025 Triniti Media Indonesia</p>
+            
+            {/* Footer: Fixed Height */}
+            <div className="p-4 border-t border-slate-800 bg-slate-900 flex-shrink-0">
+                <div className="flex items-center justify-center p-3 rounded-lg bg-slate-800/50 border border-slate-800">
+                    <p className="text-[10px] text-slate-500 text-center font-medium">
+                        © 2025 Triniti Media Indonesia<br/>
+                        <span className="opacity-50">v1.2.0-Ent</span>
+                    </p>
+                </div>
             </div>
         </div>
     );
@@ -341,12 +345,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <>
             {/* Mobile overlay */}
             <div 
-                className={`fixed inset-0 z-20 bg-black bg-opacity-50 transition-opacity md:hidden no-print ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+                className={`fixed inset-0 z-20 bg-slate-900/80 backdrop-blur-sm transition-opacity md:hidden no-print ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
                 onClick={() => handleSetIsOpen(false)}
             />
             
             {/* Sidebar */}
-            <aside className={`fixed top-0 left-0 z-30 h-full w-64 bg-tm-dark text-white transform transition-transform duration-300 ease-in-out md:translate-x-0 no-print ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+            <aside className={`fixed top-0 left-0 z-30 h-full w-64 bg-slate-900 transform transition-transform duration-300 ease-in-out md:translate-x-0 no-print shadow-2xl ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
                 <SidebarContent />
             </aside>
         </>

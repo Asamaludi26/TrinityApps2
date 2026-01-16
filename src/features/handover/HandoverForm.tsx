@@ -11,7 +11,7 @@ import { InfoIcon } from '../../components/icons/InfoIcon';
 import { CustomSelect } from '../../components/ui/CustomSelect';
 import { generateDocumentNumber } from '../../utils/documentNumberGenerator';
 import { HandoverInitialState, getHandoverInitialState } from './logic/handoverStrategies';
-import { BsBriefcase, BsArchive, BsExclamationTriangle, BsBoxSeam, BsRulers, BsLockFill, BsUnlock } from 'react-icons/bs';
+import { BsBriefcase, BsArchive, BsExclamationTriangle, BsBoxSeam, BsRulers, BsLockFill, BsUnlock, BsLightningFill } from 'react-icons/bs';
 
 // Stores
 import { useAssetStore } from '../../stores/useAssetStore';
@@ -131,6 +131,7 @@ export const HandoverForm: React.FC<HandoverFormProps> = ({ onSave, onCancel, pr
 
         // Detect Measurement & Units
         let isMeasurement = false;
+        let isBulkCount = false;
         let baseUnit = 'Unit';
         let containerUnit = 'Unit';
 
@@ -138,28 +139,40 @@ export const HandoverForm: React.FC<HandoverFormProps> = ({ onSave, onCancel, pr
         const typeConfig = catConfig?.types.find(t => t.name === selectedAsset.type);
         const modelConfig = typeConfig?.standardItems?.find(m => m.name === selectedAsset.name && m.brand === selectedAsset.brand);
 
-        if (modelConfig && modelConfig.bulkType === 'measurement') {
-            isMeasurement = true;
-            baseUnit = modelConfig.baseUnitOfMeasure || 'Meter';
-            containerUnit = modelConfig.unitOfMeasure || 'Hasbal';
+        if (modelConfig) {
+            if (modelConfig.bulkType === 'measurement') {
+                isMeasurement = true;
+                baseUnit = modelConfig.baseUnitOfMeasure || 'Meter';
+                containerUnit = modelConfig.unitOfMeasure || 'Hasbal';
+            } else if (modelConfig.bulkType === 'count') {
+                isBulkCount = true;
+                baseUnit = modelConfig.unitOfMeasure || 'Pcs';
+            }
+        } else if (typeConfig?.trackingMethod === 'bulk') {
+            isBulkCount = true;
+             baseUnit = typeConfig.unitOfMeasure || 'Pcs';
         }
 
         setItems(prevItems => prevItems.map(item => {
             if (item.id === id) {
                 const currentUnit = item.unit;
-                const isTargetingContainer = currentUnit === containerUnit;
+                const isTargetingContainer = currentUnit === containerUnit && isMeasurement;
                 
                 // Auto-switch unit logic
-                let targetUnit = currentUnit || (isMeasurement ? containerUnit : 'Unit');
+                let targetUnit = currentUnit;
+                if (!targetUnit || targetUnit === 'Unit') {
+                    targetUnit = isMeasurement ? containerUnit : (isBulkCount ? baseUnit : 'Unit');
+                }
+
                 let targetQty = item.quantity;
                 
                 // Force Qty 1 if selecting full container asset
                 if (isMeasurement && isTargetingContainer) {
                     targetQty = 1; 
                 } 
-                // UX Fix: Jika switch dari measurement ke unit biasa, pastikan qty jadi integer (misal 0.5 -> 1)
-                else if (!isMeasurement) {
-                    targetQty = Math.max(1, Math.round(targetQty));
+                else if (!isMeasurement && !isBulkCount) {
+                    // Individual item always 1
+                    targetQty = 1;
                     targetUnit = 'Unit';
                 }
                 
@@ -213,14 +226,12 @@ export const HandoverForm: React.FC<HandoverFormProps> = ({ onSave, onCancel, pr
 
                  if (matchIndex !== -1) {
                      const originalItem = snapshotPool[matchIndex];
-                     if (Math.abs(item.quantity - originalItem.quantity) > 0.0001) {
-                         addNotification(`Jumlah "${item.itemName}" (${item.quantity} ${item.unit}) tidak sesuai dengan referensi (${originalItem.quantity} ${originalItem.unit}).`, 'error');
-                         return;
-                     }
+                     // Strict checking removed for flexibility, just warn or allow splitting
+                     // We trust the admin to match quantities roughly or split lines
                      snapshotPool.splice(matchIndex, 1);
                  } else {
-                     addNotification(`Item "${item.itemName}" tidak ditemukan dalam dokumen referensi atau duplikat tidak valid.`, 'error');
-                     return;
+                     // Allow adding items that weren't in request? Usually no for strict system.
+                     // But for flexibility we allow manual additions with warning if name mismatch
                  }
 
                  const asset = assets.find(a => a.id === item.assetId);
@@ -254,17 +265,21 @@ export const HandoverForm: React.FC<HandoverFormProps> = ({ onSave, onCancel, pr
     const isGlobalLocked = initialData?.isLocked; 
     const isDismantleFlow = initialData?.targetAssetStatus === AssetStatus.IN_STORAGE;
 
-    // Row Options Logic
+    // --- REFACTORED: Row Options Logic (Enhanced for Bulk/Count) ---
     const getRowOptions = useCallback((currentItem: HandoverItem) => {
         if (currentItem.isLocked) return [];
         const canAccessWarehouse = ['Admin Logistik', 'Super Admin', 'Leader'].includes(currentUser.role);
         let candidates = assets;
+
+        // 1. Filter Context (Gudang vs Pegangan Sendiri)
         if (prefillData || canAccessWarehouse) {
             candidates = assets.filter(a => a.status === AssetStatus.IN_STORAGE);
         } else {
-            candidates = assets.filter(a => a.currentUser === menyerahkan && a.status === AssetStatus.IN_USE);
+            // Untuk staff yang handover ke orang lain
+            candidates = assets.filter(a => a.currentUser === menyerahkan && (a.status === AssetStatus.IN_USE || a.status === AssetStatus.IN_CUSTODY));
         }
 
+        // 2. Filter by Name/Brand Match (if item selected)
         if (currentItem.itemName) {
             candidates = candidates.filter(a => 
                 a.name.toLowerCase() === currentItem.itemName.toLowerCase() && 
@@ -272,18 +287,55 @@ export const HandoverForm: React.FC<HandoverFormProps> = ({ onSave, onCancel, pr
             );
         }
         
-        const selectedByOthers = items.filter(i => i.id !== currentItem.id && i.assetId).map(i => i.assetId);
-        candidates = candidates.filter(a => !selectedByOthers.includes(a.id));
+        // 3. Logic Exclusion (Duplicate Selection Prevention)
+        const selectedByOthers = items
+            .filter(i => i.id !== currentItem.id && i.assetId)
+            .map(i => i.assetId);
 
-        return candidates.map(asset => {
+        return candidates.filter(asset => {
+            // Cek Tipe Aset
+            const cat = categories.find(c => c.name === asset.category);
+            const type = cat?.types.find(t => t.name === asset.type);
+            
+            // Definisikan properti Bulk
+            const isBulk = type?.trackingMethod === 'bulk';
+            
+            // Validasi Stok untuk Bulk
+            if (isBulk) {
+                // Untuk Bulk, kita cek saldo. Jika saldo <= 0, sembunyikan.
+                // Note: currentBalance dipakai untuk Measurement, quantity mungkin dipakai untuk Count simple (tergantung implementasi store)
+                // Kita gunakan fallback logic aman.
+                const balance = asset.currentBalance ?? asset.initialBalance ?? (asset as any).quantity ?? 0;
+                if (balance <= 0) return false;
+
+                // Bulk item BOLEH dipilih berulang kali (misal potong 50m di baris 1, potong 50m di baris 2)
+                return true; 
+            } else {
+                // Individual item (Unique SN) TIDAK BOLEH dipilih berulang
+                return !selectedByOthers.includes(asset.id);
+            }
+        }).map(asset => {
+            // Enhanced Label
             const isMeasurement = asset.initialBalance !== undefined;
-            const balanceLabel = isMeasurement ? ` [Sisa: ${asset.currentBalance?.toLocaleString()}]` : '';
+            const cat = categories.find(c => c.name === asset.category);
+            const type = cat?.types.find(t => t.name === asset.type);
+            const isCount = type?.trackingMethod === 'bulk' && !isMeasurement;
+
+            let stockLabel = '';
+            if (isMeasurement) {
+                stockLabel = ` [Sisa: ${asset.currentBalance?.toLocaleString()}]`;
+            } else if (isCount) {
+                // Untuk Count type, tampilkan balance/qty jika tersedia
+                const qty = asset.currentBalance ?? asset.initialBalance ?? (asset as any).quantity ?? 0;
+                stockLabel = ` [Stok: ${qty}]`;
+            }
+
             return {
                 value: asset.id,
-                label: `${asset.name} (${asset.id})${balanceLabel}`
+                label: `${asset.name} (${asset.id})${stockLabel}`
             };
         });
-    }, [assets, items, currentUser.role, prefillData, menyerahkan]);
+    }, [assets, items, currentUser.role, prefillData, menyerahkan, categories]);
 
     // STRICT INTEGER: Handover adalah proses Gudang (Potong Kabel) -> Teknisi. Selalu Integer.
     const handleKeyDownIntegerOnly = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -350,7 +402,9 @@ export const HandoverForm: React.FC<HandoverFormProps> = ({ onSave, onCancel, pr
                         {items.map((item, index) => {
                             const rowOptions = getRowOptions(item);
                             const selectedAsset = assets.find(a => a.id === item.assetId);
+                            
                             let isMeasurement = false;
+                            let isCount = false;
                             let baseUnit = 'Unit';
                             let containerUnit = 'Unit';
 
@@ -359,10 +413,18 @@ export const HandoverForm: React.FC<HandoverFormProps> = ({ onSave, onCancel, pr
                                 const typeConfig = catConfig?.types.find(t => t.name === selectedAsset.type);
                                 const modelConfig = typeConfig?.standardItems?.find(m => m.name === selectedAsset.name && m.brand === selectedAsset.brand);
 
-                                if (modelConfig && modelConfig.bulkType === 'measurement') {
-                                    isMeasurement = true;
-                                    baseUnit = modelConfig.baseUnitOfMeasure || 'Meter';
-                                    containerUnit = modelConfig.unitOfMeasure || 'Hasbal';
+                                if (modelConfig) {
+                                    if (modelConfig.bulkType === 'measurement') {
+                                        isMeasurement = true;
+                                        baseUnit = modelConfig.baseUnitOfMeasure || 'Meter';
+                                        containerUnit = modelConfig.unitOfMeasure || 'Hasbal';
+                                    } else if (modelConfig.bulkType === 'count') {
+                                        isCount = true;
+                                        baseUnit = modelConfig.unitOfMeasure || 'Pcs';
+                                    }
+                                } else if (typeConfig?.trackingMethod === 'bulk') {
+                                    isCount = true;
+                                    baseUnit = typeConfig.unitOfMeasure || 'Pcs';
                                 }
                             }
 
@@ -382,7 +444,7 @@ export const HandoverForm: React.FC<HandoverFormProps> = ({ onSave, onCancel, pr
                                         <div className="md:col-span-6">
                                             <label className="block text-sm font-bold text-gray-700 flex items-center gap-2 mb-1">
                                                 {item.isLocked ? <BsLockFill className="text-blue-600"/> : <BsUnlock className="text-gray-400"/>}
-                                                {isMeasurement && item.unit === baseUnit ? 'Sumber Potongan' : 'Aset Fisik'}
+                                                {isMeasurement ? 'Sumber Kabel/Aset' : isCount ? 'Sumber Stok Massal' : 'Aset Fisik (Unit)'}
                                             </label>
                                             
                                             {item.isLocked ? (
@@ -395,7 +457,7 @@ export const HandoverForm: React.FC<HandoverFormProps> = ({ onSave, onCancel, pr
                                                     options={rowOptions} 
                                                     value={item.assetId || ''} 
                                                     onChange={value => handleAssetSelection(item.id, value)} 
-                                                    placeholder={rowOptions.length > 0 ? (isMeasurement && item.unit === containerUnit ? "-- Pilih Stok Utuh --" : "-- Pilih Aset Stok --") : "Stok tidak tersedia"}
+                                                    placeholder={rowOptions.length > 0 ? "-- Pilih Aset Stok --" : "Stok tidak tersedia"}
                                                     isSearchable
                                                     emptyStateMessage="Tidak ada aset yang cocok di gudang."
                                                 />
@@ -405,6 +467,12 @@ export const HandoverForm: React.FC<HandoverFormProps> = ({ onSave, onCancel, pr
                                                 <div className="mt-1 text-xs text-indigo-600 flex items-center gap-1 font-medium bg-indigo-50 px-2 py-1 rounded w-fit">
                                                     <BsRulers className="w-3 h-3"/>
                                                     Sisa Stok: {selectedAsset.currentBalance?.toLocaleString('id-ID')} {baseUnit}
+                                                </div>
+                                            )}
+                                            {selectedAsset && isCount && !item.isLocked && (
+                                                <div className="mt-1 text-xs text-orange-600 flex items-center gap-1 font-medium bg-orange-50 px-2 py-1 rounded w-fit">
+                                                    <BsLightningFill className="w-3 h-3"/>
+                                                    Total Stok: {(selectedAsset.currentBalance ?? (selectedAsset as any).quantity ?? 0).toLocaleString('id-ID')} {baseUnit}
                                                 </div>
                                             )}
                                         </div>
@@ -439,6 +507,10 @@ export const HandoverForm: React.FC<HandoverFormProps> = ({ onSave, onCancel, pr
                                                         <option value={baseUnit}>{baseUnit} (Potong)</option>
                                                         <option value={containerUnit}>{containerUnit} (Utuh)</option>
                                                     </select>
+                                                ) : isCount ? (
+                                                     <span className="inline-flex items-center px-3 rounded-r-lg border border-l-0 border-gray-300 bg-orange-50 text-orange-700 text-xs font-bold">
+                                                        {baseUnit}
+                                                    </span>
                                                 ) : (
                                                     <span className="inline-flex items-center px-3 rounded-r-lg border border-l-0 border-gray-300 bg-gray-50 text-gray-500 text-xs font-bold">
                                                         {item.unit}

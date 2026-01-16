@@ -1,24 +1,15 @@
 
 import React from 'react';
-import { AssetReturn, AssetReturnStatus } from '../../../../types';
+import { AssetReturn } from '../../../../types';
 import { InboxIcon } from '../../../../components/icons/InboxIcon';
 import { EyeIcon } from '../../../../components/icons/EyeIcon';
 import { SortConfig } from '../../../../hooks/useSortableData';
 import { SortIcon } from '../../../../components/icons/SortIcon';
 import { SortAscIcon } from '../../../../components/icons/SortAscIcon';
 import { SortDescIcon } from '../../../../components/icons/SortDescIcon';
-import { BsCalendarEvent, BsThreeDotsVertical, BsBoxSeam, BsCollection } from 'react-icons/bs';
+import { BsCalendarEvent, BsThreeDotsVertical } from 'react-icons/bs';
 import { useLongPress } from '../../../../hooks/useLongPress';
-
-export const getReturnStatusClass = (status: AssetReturnStatus) => {
-    switch (status) {
-        case AssetReturnStatus.PENDING_APPROVAL: return 'bg-amber-50 text-amber-700 border border-amber-200';
-        case AssetReturnStatus.APPROVED: return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
-        case AssetReturnStatus.COMPLETED: return 'bg-blue-50 text-blue-700 border border-blue-200';
-        case AssetReturnStatus.REJECTED: return 'bg-rose-50 text-rose-700 border border-rose-200';
-        default: return 'bg-gray-50 text-gray-700 border border-gray-200';
-    }
-};
+import { StatusBadge } from '../../../../components/ui/StatusBadge';
 
 const SortableHeader: React.FC<{
     children: React.ReactNode;
@@ -67,7 +58,6 @@ export const ReturnRequestTable: React.FC<ReturnRequestTableProps> = ({ returns,
             <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur-sm border-b border-slate-200 shadow-sm">
                 <tr>
                     <SortableHeader columnKey="docNumber" sortConfig={sortConfig} requestSort={requestSort}>Info Dokumen</SortableHeader>
-                    {/* Changed from 'assetName' to generic item count or summary */}
                     <th scope="col" className="px-6 py-4 text-sm font-extrabold uppercase tracking-wider text-slate-700 text-left">Ringkasan Item</th>
                     <SortableHeader columnKey="returnedBy" sortConfig={sortConfig} requestSort={requestSort}>Pengembali</SortableHeader>
                     <SortableHeader columnKey="status" sortConfig={sortConfig} requestSort={requestSort}>Status</SortableHeader>
@@ -120,9 +110,7 @@ export const ReturnRequestTable: React.FC<ReturnRequestTableProps> = ({ returns,
 
                         {/* Column 4: Status */}
                         <td className="px-6 py-5 align-middle">
-                            <span className={`inline-flex items-center gap-1.5 px-3 py-1 text-[11px] font-bold uppercase tracking-wider rounded-full shadow-sm ${getReturnStatusClass(ret.status)}`}>
-                                {ret.status}
-                            </span>
+                            <StatusBadge status={ret.status} />
                         </td>
 
                         {/* Column 5: Actions */}

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Request,
@@ -8,6 +9,7 @@ import {
   PurchaseDetails,
   Activity,
   AssetStatus,
+  AllocationTarget
 } from "../../../types";
 import { useNotification } from "../../../providers/NotificationProvider";
 import { useSortableData } from "../../../hooks/useSortableData";
@@ -71,6 +73,9 @@ const NewRequestPage: React.FC<NewRequestPageProps> = ({
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
   const [hasExistingDraft, setHasExistingDraft] = useState<string | null>(null);
   
+  // State for Allocation Lock (Sync from Dashboard)
+  const [lockedAllocation, setLockedAllocation] = useState<AllocationTarget | null>(null);
+
   // Staging / Receipt Modal State
   const [stagingRequest, setStagingRequest] = useState<Request | null>(null);
   
@@ -126,11 +131,18 @@ const NewRequestPage: React.FC<NewRequestPageProps> = ({
     requests.find(r => r.id === selectedRequestId) || null
   , [requests, selectedRequestId]);
 
+  // STATE MANAGEMENT FIX: 
+  // Handle initialization AND resetting of state when navigating between Dashboard (with filters) and Sidebar (without filters).
   useEffect(() => {
     if (initialFilters) {
       if (initialFilters.status) {
           setFilters(f => ({ ...f, status: initialFilters.status }));
       }
+      
+      // Handle Allocation Lock from StockAlertWidget
+      if (initialFilters.forcedAllocationTarget) {
+          setLockedAllocation(initialFilters.forcedAllocationTarget);
+      } 
       
       const prefillItems = initialFilters.prefillItems || (initialFilters.prefillItem ? [initialFilters.prefillItem] : null);
       
@@ -144,9 +156,18 @@ const NewRequestPage: React.FC<NewRequestPageProps> = ({
         setView("detail");
       }
       
+      // Clean up the initial filters from store to prevent stickiness on refresh/back
       onClearInitialFilters();
+    } else {
+       // CRITICAL FIX: If no initialFilters are present (normal navigation), 
+       // ensure we reset any lingering "Locked" or "Prefill" state from previous interactions.
+       // Only reset if we are NOT currently in the form view (to avoid clearing while user is typing if this effect re-runs)
+       if (view === 'list') {
+           setLockedAllocation(null);
+           setRawPrefillItems(undefined);
+       }
     }
-  }, [initialFilters, onClearInitialFilters]);
+  }, [initialFilters, onClearInitialFilters, view]);
 
   const preparedFormItems = useMemo(() => {
     return prepareInitialItems(rawPrefillItems, assets, categories);
@@ -332,6 +353,7 @@ const NewRequestPage: React.FC<NewRequestPageProps> = ({
       addNotificationUI('Permintaan berhasil diajukan.', 'success');
       setView("list");
       setRawPrefillItems(undefined); // Clear prefill
+      setLockedAllocation(null); // Clear lock
     } finally {
       setIsLoading(false);
     }
@@ -348,6 +370,12 @@ const NewRequestPage: React.FC<NewRequestPageProps> = ({
       }
   };
 
+  const handleCancelForm = () => {
+      setView("list"); 
+      setRawPrefillItems(undefined);
+      setLockedAllocation(null);
+  };
+
   return (
     <div className="h-full bg-tm-light">
       {view === "form" ? (
@@ -355,7 +383,7 @@ const NewRequestPage: React.FC<NewRequestPageProps> = ({
            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
              <div className="flex items-center gap-4">
                <button 
-                  onClick={() => { setView("list"); setRawPrefillItems(undefined); }} 
+                  onClick={handleCancelForm} 
                   className="flex items-center justify-center w-10 h-10 bg-white border border-gray-200 rounded-full text-gray-500 hover:text-tm-primary hover:border-tm-primary transition-all shadow-sm"
                   aria-label="Kembali"
                >
@@ -366,7 +394,7 @@ const NewRequestPage: React.FC<NewRequestPageProps> = ({
                  <p className="text-sm text-gray-500 mt-0.5">Isi formulir untuk mengajukan pengadaan aset.</p>
                </div>
              </div>
-             <button onClick={() => { setView("list"); setRawPrefillItems(undefined); }} className="px-4 py-2 text-sm font-semibold text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shadow-sm">Batal</button>
+             <button onClick={handleCancelForm} className="px-4 py-2 text-sm font-semibold text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shadow-sm">Batal</button>
            </div>
            
            <div className="p-8 bg-white rounded-2xl shadow-xl border border-gray-200">
@@ -376,11 +404,14 @@ const NewRequestPage: React.FC<NewRequestPageProps> = ({
                 assetCategories={categories} 
                 divisions={divisions} 
                 onCreateRequest={handleCreateRequest} 
-                onCancel={() => { setView("list"); setRawPrefillItems(undefined); }}
+                onCancel={handleCancelForm}
                 // Pass prepared initial items to the form
                 initialItems={preparedFormItems}
                 // Pass Urgent if items are prefilled from stock alert
                 initialOrderType={rawPrefillItems && rawPrefillItems.length > 0 ? 'Urgent' : undefined}
+                // Lock allocation for Restock scenario
+                initialAllocationTarget={lockedAllocation || undefined}
+                isAllocationLocked={!!lockedAllocation}
              />
            </div>
         </div>

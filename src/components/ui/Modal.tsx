@@ -35,7 +35,7 @@ const Modal: React.FC<ModalProps> = ({
     size = 'lg', 
     hideDefaultCloseButton = false, 
     closeButtonText = 'Tutup', 
-    zIndex = 'z-50', 
+    zIndex, // Optional prop
     disableContentPadding = false 
 }) => {
   const modalRef = useRef<HTMLDivElement>(null);
@@ -74,6 +74,9 @@ const Modal: React.FC<ModalProps> = ({
       
       const handleEscape = (event: KeyboardEvent) => {
         if (event.key === 'Escape') {
+          // Hanya tutup jika ini adalah modal teratas (logika sederhana)
+          // Untuk aplikasi kompleks, kita butuh stack manager.
+          // Disini kita asumsi close dipanggil dari parent.
           onClose();
         }
       };
@@ -91,9 +94,12 @@ const Modal: React.FC<ModalProps> = ({
 
   if (!isVisible && !isOpen) return null;
 
+  // Default Z-Index handling to ensure stacking works visually
+  const effectiveZIndex = zIndex || 'z-50';
+
   return (
     <div
-      className={`fixed inset-0 ${zIndex} overflow-y-auto custom-scrollbar`}
+      className={`fixed inset-0 ${effectiveZIndex} overflow-y-auto custom-scrollbar`}
       aria-labelledby="modal-title"
       role="dialog"
       aria-modal="true"
@@ -106,12 +112,12 @@ const Modal: React.FC<ModalProps> = ({
       ></div>
       
       {/* Centering container */}
-      <div className="flex min-h-full items-center justify-center p-4 text-center sm:p-6">
-          {/* Modal Panel */}
+      <div className="flex min-h-full items-center justify-center p-4 text-center sm:p-6 pointer-events-none">
+          {/* Modal Panel - Add pointer-events-auto to enable clicks inside */}
           <div
               ref={modalRef}
               className={`
-                relative w-full transform rounded-2xl bg-white text-left shadow-2xl ring-1 ring-black/5 transition-all duration-300 ease-out flex flex-col max-h-[90vh]
+                relative w-full transform rounded-2xl bg-white text-left shadow-2xl ring-1 ring-black/5 transition-all duration-300 ease-out flex flex-col max-h-[90vh] pointer-events-auto
                 ${sizeClasses[size]}
                 ${isAnimating ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-4 scale-95'}
               `}

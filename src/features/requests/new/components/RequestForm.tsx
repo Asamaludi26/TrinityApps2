@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   User, 
@@ -8,7 +9,7 @@ import {
   RequestItem, 
   OrderDetails, 
   OrderType, 
-  AssetStatus,
+  AllocationTarget,
   AssetType,
   StandardItem,
   ItemClassification
@@ -35,13 +36,15 @@ import {
   BsInfoCircle,
   BsExclamationTriangleFill,
   BsRulers,
-  BsArrowRight
+  BsArchive,
+  BsBriefcase,
+  BsLockFill // Icon tambahan
 } from 'react-icons/bs';
 import DatePicker from '../../../../components/ui/DatePicker';
 import { useAssetStore } from '../../../../stores/useAssetStore';
-import { RequestItemFormState } from '../utils/requestHelpers'; // Import Type
+import { RequestItemFormState } from '../utils/requestHelpers'; 
 
-const DRAFT_VERSION = "1.0.6"; // Bump version
+const DRAFT_VERSION = "1.0.7"; 
 const MAX_ITEMS = 15;
 
 interface RequestFormProps {
@@ -52,10 +55,12 @@ interface RequestFormProps {
   onCreateRequest: (data: { items: RequestItem[]; order: OrderDetails }) => void;
   initialItems?: RequestItemFormState[];
   initialOrderType?: OrderType;
+  // NEW PROPS
+  initialAllocationTarget?: AllocationTarget;
+  isAllocationLocked?: boolean;
   onCancel: () => void;
 }
 
-// Default options for standard items
 const STANDARD_UNIT_OPTIONS = ['Unit', 'Pcs', 'Set', 'Pack', 'Box'];
 
 export const RequestForm: React.FC<RequestFormProps> = ({ 
@@ -66,6 +71,8 @@ export const RequestForm: React.FC<RequestFormProps> = ({
   onCreateRequest, 
   initialItems, 
   initialOrderType,
+  initialAllocationTarget,
+  isAllocationLocked,
   onCancel 
 }) => {
   const [items, setItems] = useState<RequestItemFormState[]>(() => {
@@ -83,6 +90,10 @@ export const RequestForm: React.FC<RequestFormProps> = ({
   const [orderType, setOrderType] = useState<OrderType>(initialOrderType || 'Regular Stock');
   const [justification, setJustification] = useState('');
   const [project, setProject] = useState('');
+  
+  // Initialize allocation target with prop or default
+  const [allocationTarget, setAllocationTarget] = useState<AllocationTarget>(initialAllocationTarget || 'Usage');
+  
   const [isLoading, setIsLoading] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
@@ -98,8 +109,16 @@ export const RequestForm: React.FC<RequestFormProps> = ({
   const userDivision = useMemo(() => 
     divisions.find(d => d.id === currentUser.divisionId)?.name || 'N/A'
   , [divisions, currentUser]);
-
+  
+  const canChooseAllocation = ['Admin Logistik', 'Super Admin'].includes(currentUser.role);
   const categoryNames = useMemo(() => assetCategories.map(c => c.name), [assetCategories]);
+
+  // Sync prop changes (e.g. from Restock Dashboard redirect)
+  useEffect(() => {
+    if (initialAllocationTarget) {
+        setAllocationTarget(initialAllocationTarget);
+    }
+  }, [initialAllocationTarget]);
 
   useEffect(() => {
     if (initialItems && initialItems.length > 0) {
@@ -113,9 +132,13 @@ export const RequestForm: React.FC<RequestFormProps> = ({
            setOrderType('Regular Stock');
            setJustification('');
            setProject('');
+           // Only reset if not locked externally
+           if (!isAllocationLocked) {
+               setAllocationTarget(canChooseAllocation ? 'Inventory' : 'Usage');
+           }
        }
     }
-  }, [initialItems, initialOrderType]);
+  }, [initialItems, initialOrderType, canChooseAllocation, isAllocationLocked]);
 
   useEffect(() => {
     if (!initialItems) {
@@ -123,12 +146,15 @@ export const RequestForm: React.FC<RequestFormProps> = ({
         if (savedDraft) {
           try {
             const parsed = JSON.parse(savedDraft);
-            // Allow slightly older drafts if structure is compatible
             if (parsed.version && parsed.items) {
                 setItems(parsed.items);
                 setOrderType(parsed.orderType);
                 setJustification(parsed.justification);
                 setProject(parsed.project);
+                // Only load saved target if not currently forced/locked
+                if (!isAllocationLocked) {
+                    setAllocationTarget(parsed.allocationTarget || 'Usage');
+                }
                 setLastSaved(parsed.lastSaved);
                 addNotification("Draf permintaan telah dimuat.", "info");
             }
@@ -137,8 +163,9 @@ export const RequestForm: React.FC<RequestFormProps> = ({
           }
         }
     }
-  }, [userDraftKey, initialItems]);
+  }, [userDraftKey, initialItems, isAllocationLocked]);
 
+  // ... (Keep handleAddItem, handleRemoveItem, updateItemState, handleUnitChange same as before) ...
   const handleAddItem = () => {
     if (items.length >= MAX_ITEMS) {
         addNotification(`Batas maksimal ${MAX_ITEMS} item tercapai.`, "warning");
@@ -154,30 +181,24 @@ export const RequestForm: React.FC<RequestFormProps> = ({
     if (items.length > 1) setItems(prev => prev.filter(i => i.id !== id));
   };
 
-  // --- SMART UPDATE STATE with ATP & Flexible Measurement Logic ---
   const updateItemState = useCallback((id: number, updates: Partial<RequestItemFormState>) => {
     setItems(prev => prev.map(item => {
       if (item.id === id) {
         const nextItem = { ...item, ...updates };
         
-        // Reset Logic on Category Change
         if ('tempCategoryId' in updates && updates.tempCategoryId !== item.tempCategoryId) {
             nextItem.tempTypeId = ''; nextItem.itemName = ''; nextItem.itemTypeBrand = ''; 
             nextItem.availableStock = 0; nextItem.stockDetails = undefined;
         }
         
-        // Reset Logic on Type Change
         if ('tempTypeId' in updates && updates.tempTypeId !== item.tempTypeId) {
             nextItem.itemName = ''; nextItem.itemTypeBrand = ''; 
             nextItem.availableStock = 0; nextItem.stockDetails = undefined;
-            
-            // Auto-detect unit from Type config
             const cat = assetCategories.find(c => c.id.toString() === nextItem.tempCategoryId);
             const typeData = cat?.types.find(t => t.id.toString() === updates.tempTypeId);
             nextItem.unit = typeData?.unitOfMeasure || 'Unit';
         }
 
-        // Logic on Model Change (Auto-fill Brand & Smart Unit)
         if ('itemName' in updates && updates.itemName) {
            const cat = assetCategories.find(c => c.id.toString() === nextItem.tempCategoryId);
            const typeData = cat?.types.find(t => t.id.toString() === nextItem.tempTypeId);
@@ -185,8 +206,6 @@ export const RequestForm: React.FC<RequestFormProps> = ({
            
            if (modelData) {
                nextItem.itemTypeBrand = modelData.brand || '';
-               
-               // FLEXIBLE UNIT LOGIC:
                if (!('unit' in updates)) {
                    if (modelData.bulkType === 'measurement') {
                        nextItem.unit = modelData.unitOfMeasure || 'Hasbal';
@@ -197,22 +216,17 @@ export const RequestForm: React.FC<RequestFormProps> = ({
            }
         }
 
-        // TRIGGER ATP CHECK
         const nameToCheck = nextItem.itemName;
         const brandToCheck = nextItem.itemTypeBrand;
         const qtyToCheck = nextItem.quantity;
         const unitToCheck = nextItem.unit;
         
         if (nameToCheck && brandToCheck) {
-             // Call ATP check with Context Aware Unit
              const stockInfo = checkAvailability(nameToCheck, brandToCheck, Number(qtyToCheck), unitToCheck);
-             
-             // Update Display berdasarkan hasil smart dari store
              nextItem.availableStock = stockInfo.availableSmart;
-
              nextItem.stockDetails = {
                  physical: stockInfo.physicalCount,
-                 reserved: stockInfo.reservedCount, // Reserved physical
+                 reserved: stockInfo.reservedCount, 
                  isFragmented: stockInfo.isFragmented
              };
         } else {
@@ -226,12 +240,10 @@ export const RequestForm: React.FC<RequestFormProps> = ({
     }));
   }, [assetCategories, checkAvailability]);
 
-  // Handler khusus untuk perubahan Unit agar bisa reset Qty jika magnitudo berubah
   const handleUnitChange = (itemId: number, newUnit: string) => {
       const item = items.find(i => i.id === itemId);
       if(!item) return;
 
-      // Cek apakah model ini measurement
       const currentCat = assetCategories.find(c => c.id.toString() === item.tempCategoryId);
       const currentType = currentCat?.types.find(t => t.id.toString() === item.tempTypeId);
       const selectedModel = currentType?.standardItems?.find(m => m.name === item.itemName && m.brand === item.itemTypeBrand);
@@ -242,19 +254,13 @@ export const RequestForm: React.FC<RequestFormProps> = ({
           const containerUnit = selectedModel.unitOfMeasure || 'Hasbal';
           const baseUnit = selectedModel.baseUnitOfMeasure || 'Meter';
           
-          // INTELLIGENT RESET: Only reset if converting from Base (Big Number) to Container (Small Number)
-          // Threshold logic: If quantity is > 50 (likely Meters) and switching to Container, assume user needs to reset to 1 container.
-          // Otherwise preserve number (e.g. 5 Meters -> 5 Hasbal is weird, but 5 Hasbal -> 5 Meters is definitely weird. Resetting to 1 is safer for upscaling).
           if (item.unit === baseUnit && newUnit === containerUnit) {
-              if (newQty > 50) { // Threshold for "Big Number"
+              if (newQty > 50) { 
                   newQty = 1;
                   addNotification("Kuantitas di-reset ke 1 (Mode Kontainer).", "info");
               }
           }
-          // Note: If switching Container -> Base (1 Hasbal -> Meter), we *could* auto-multiply by quantityPerUnit,
-          // but better let user type "1000" explicitly to be sure.
       }
-
       updateItemState(itemId, { unit: newUnit, quantity: newQty });
   };
 
@@ -264,6 +270,7 @@ export const RequestForm: React.FC<RequestFormProps> = ({
       return allInStock ? 'stock' : 'procurement';
   }, [items]);
 
+  // ... (Keep handleCategorySelect, handleTypeSelect, handleUpdateTypeConfig, handleModelSelect same as before) ...
   const handleCategorySelect = async (itemId: number, value: string) => {
     if (!value.trim()) return;
     const existingCat = assetCategories.find(c => c.name.toLowerCase() === value.trim().toLowerCase());
@@ -343,6 +350,7 @@ export const RequestForm: React.FC<RequestFormProps> = ({
     }
   };
 
+
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (items.some(i => !i.itemName || i.quantity <= 0)) {
@@ -360,13 +368,13 @@ export const RequestForm: React.FC<RequestFormProps> = ({
         unit: unit 
     }));
 
-    onCreateRequest({ items: cleanItems, order: { type: orderType, justification, project } });
+    onCreateRequest({ items: cleanItems, order: { type: orderType, justification, project, allocationTarget } });
   };
 
   const handleSaveDraft = () => {
     setIsSavingDraft(true);
     const now = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
-    const draftData = { version: DRAFT_VERSION, items, orderType, justification, project, lastSaved: now, updatedAt: new Date().toISOString() };
+    const draftData = { version: DRAFT_VERSION, items, orderType, justification, project, allocationTarget, lastSaved: now, updatedAt: new Date().toISOString() };
     
     setTimeout(() => {
       try {
@@ -413,8 +421,60 @@ export const RequestForm: React.FC<RequestFormProps> = ({
           <div className="text-center my-6"><h2 className="text-xl font-bold text-slate-800 uppercase tracking-wide">Surat Permintaan Barang</h2></div>
 
           <form onSubmit={handleFormSubmit} className="space-y-8">
-              <div className="bg-slate-50/80 p-6 rounded-xl border border-slate-200 shadow-sm">
+              <div className="bg-slate-50/80 p-6 rounded-xl border border-slate-200 shadow-sm relative">
+                  
+                  {/* ADMIN ONLY: Allocation Target Selector */}
+                  {canChooseAllocation && (
+                      <div className="mb-6 pb-4 border-b border-slate-200 relative">
+                          {isAllocationLocked && (
+                              <div className="absolute top-0 right-0 z-10">
+                                  <span className="flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full border border-amber-200 shadow-sm">
+                                      <BsLockFill /> Mode Restock Aktif
+                                  </span>
+                              </div>
+                          )}
+                          <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Tujuan Pengadaan</label>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <label className={`relative flex items-start p-4 cursor-pointer rounded-lg border-2 transition-all ${allocationTarget === 'Inventory' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:bg-gray-50'} ${isAllocationLocked && allocationTarget !== 'Inventory' ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                  <input 
+                                      type="radio" 
+                                      name="allocationTarget" 
+                                      value="Inventory" 
+                                      checked={allocationTarget === 'Inventory'} 
+                                      onChange={() => setAllocationTarget('Inventory')} 
+                                      disabled={isAllocationLocked}
+                                      className="mt-1 h-4 w-4 text-purple-600 border-gray-300 focus:ring-purple-500" 
+                                  />
+                                  <div className="ml-3">
+                                      <span className="block text-sm font-bold text-gray-900 flex items-center gap-2"><BsArchive className="text-purple-500"/> Stok Gudang (Restock)</span>
+                                      <span className="block text-xs text-gray-500 mt-1">
+                                         {isAllocationLocked 
+                                             ? "Opsi ini dikunci karena Anda memulai dari menu Peringatan Stok Dashboard."
+                                             : "Barang masuk inventory gudang umum. Tidak perlu handover."}
+                                      </span>
+                                  </div>
+                              </label>
+                              <label className={`relative flex items-start p-4 cursor-pointer rounded-lg border-2 transition-all ${allocationTarget === 'Usage' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:bg-gray-50'} ${isAllocationLocked && allocationTarget !== 'Usage' ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                                  <input 
+                                      type="radio" 
+                                      name="allocationTarget" 
+                                      value="Usage" 
+                                      checked={allocationTarget === 'Usage'} 
+                                      onChange={() => setAllocationTarget('Usage')} 
+                                      disabled={isAllocationLocked}
+                                      className="mt-1 h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500" 
+                                  />
+                                  <div className="ml-3">
+                                      <span className="block text-sm font-bold text-gray-900 flex items-center gap-2"><BsBriefcase className="text-blue-500"/> Penggunaan Sendiri / Proyek</span>
+                                      <span className="block text-xs text-gray-500 mt-1">Barang untuk keperluan spesifik/pribadi. Wajib handover saat diterima.</span>
+                                  </div>
+                              </label>
+                          </div>
+                      </div>
+                  )}
+
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      {/* ... Header Fields (Requester, Date, Type) ... */}
                       <div><label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">No. Request</label><div className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-400 text-sm italic shadow-sm">[Auto: RO-YYMMDD-XXXX]</div></div>
                       <div><label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">No. Dokumen</label><div className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-slate-400 text-sm italic shadow-sm">[Auto: RO-YYMMDD-XXXX]</div></div>
                       <div><label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Tanggal</label><DatePicker id="req-date" selectedDate={requestDate} onDateChange={setRequestDate} /></div>
@@ -440,7 +500,7 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                       <h3 className="text-sm font-bold text-slate-800 uppercase flex items-center gap-2"><BsBoxSeam className="text-tm-primary w-4 h-4" /> Daftar Barang</h3>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${isAtLimit ? 'bg-red-50 text-red-600 border-red-100' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>{items.length} / {MAX_ITEMS}</span>
                   </div>
-
+                  {/* ... Item List (No Changes Needed Here, Logic already reused) ... */}
                   <div className="space-y-3">
                       {items.map((item, idx) => {
                           const currentCat = assetCategories.find(c => c.id.toString() === item.tempCategoryId);
@@ -448,28 +508,17 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                           const currentType = availableTypes.find(t => t.id.toString() === item.tempTypeId);
                           const availableModels = currentType?.standardItems || [];
                           const isNewType = currentType && Date.now() - currentType.id < 60000;
-                          
                           const hasStock = item.availableStock > 0;
                           const isFragmented = item.stockDetails?.isFragmented;
                           const reservedStock = item.stockDetails?.reserved || 0;
                           const physicalStock = item.stockDetails?.physical || 0;
-                          
                           const selectedModel = availableModels.find(m => m.name === item.itemName && m.brand === item.itemTypeBrand);
                           const isMeasurement = selectedModel?.bulkType === 'measurement';
                           const isContainerMode = item.unit === selectedModel?.unitOfMeasure;
-                          
-                          // --- STRICT TYPE ENFORCEMENT START ---
-                          // FIX: Always block decimals to align with Admin Cut logic (300m given = 300m recorded).
                           const handleQuantityKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-                              // Block '.', ',', 'e', 'E' to enforce integers
-                              if (['.', ',', 'e', 'E'].includes(e.key)) {
-                                  e.preventDefault();
-                              }
+                              if (['.', ',', 'e', 'E'].includes(e.key)) { e.preventDefault(); }
                           };
-                          // --- STRICT TYPE ENFORCEMENT END ---
-                          
                           let availableUnitOptions = STANDARD_UNIT_OPTIONS.map(u => ({ value: u, label: u }));
-                          
                           if (isMeasurement && selectedModel) {
                               availableUnitOptions = [
                                   { value: selectedModel.unitOfMeasure || 'Hasbal', label: `${selectedModel.unitOfMeasure || 'Hasbal'} (Fisik)` },
@@ -494,99 +543,38 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                                           </div>
                                           <div className="grid grid-cols-12 gap-3 items-start">
                                               <div className="col-span-12 sm:col-span-3"><label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">Brand</label><input type="text" value={item.itemTypeBrand} onChange={e => updateItemState(item.id, { itemTypeBrand: e.target.value })} placeholder="Cth: Mikrotik" className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700 focus:bg-white focus:border-tm-primary outline-none transition-colors" /></div>
-                                              
                                               <div className="col-span-4 sm:col-span-2">
-                                                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5 text-center">
-                                                    Stok ({isMeasurement ? (isContainerMode ? 'Fisik' : 'Isi') : 'ATP'})
-                                                </label>
+                                                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5 text-center">Stok ({isMeasurement ? (isContainerMode ? 'Fisik' : 'Isi') : 'ATP'})</label>
                                                 <div className="relative group/stock">
-                                                     <input 
-                                                        type="text" 
-                                                        readOnly 
-                                                        value={`${item.availableStock} ${item.unit || ''}`} 
-                                                        className={`w-full px-3 py-2 border rounded-md text-sm font-bold text-center cursor-default focus:outline-none 
-                                                            ${hasStock ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-100 border-slate-200 text-slate-400'}
-                                                            ${isFragmented ? 'border-amber-400 bg-amber-50 text-amber-800' : ''}
-                                                        `} 
-                                                     />
-                                                     
+                                                     <input type="text" readOnly value={`${item.availableStock} ${item.unit || ''}`} className={`w-full px-3 py-2 border rounded-md text-sm font-bold text-center cursor-default focus:outline-none ${hasStock ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-slate-100 border-slate-200 text-slate-400'} ${isFragmented ? 'border-amber-400 bg-amber-50 text-amber-800' : ''}`} />
                                                      {isFragmented && <BsExclamationTriangleFill className="absolute top-1/2 -translate-y-1/2 right-2 text-amber-500 w-3.5 h-3.5" />}
                                                      {reservedStock > 0 && !isFragmented && <BsInfoCircle className="absolute top-1/2 -translate-y-1/2 right-2 text-blue-400 w-3.5 h-3.5" />}
-
                                                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-2 bg-slate-800 text-white text-[10px] rounded shadow-lg opacity-0 group-hover/stock:opacity-100 transition-opacity pointer-events-none z-20">
                                                         <div className="font-bold border-b border-slate-600 pb-1 mb-1">Status Stok</div>
                                                         <div className="flex justify-between"><span>Unit Fisik (Gudang):</span> <span className="font-mono">{physicalStock} {selectedModel?.unitOfMeasure || 'Unit'}</span></div>
                                                         <div className="flex justify-between text-amber-300"><span>Ter-reservasi:</span> <span className="font-mono">{reservedStock} Unit</span></div>
-                                                        <div className="flex justify-between border-t border-slate-600 pt-1 mt-1">
-                                                            <span>Tersedia ({item.unit}):</span> 
-                                                            <span className="font-bold text-emerald-400 font-mono">{item.availableStock}</span>
-                                                        </div>
-                                                        {isMeasurement && (
-                                                            <div className="mt-1 pt-1 border-t border-slate-600 text-emerald-400 italic">
-                                                                Mode: {isContainerMode ? 'Stok Fisik' : 'Stok Isi (Eceran)'}
-                                                            </div>
-                                                        )}
+                                                        <div className="flex justify-between border-t border-slate-600 pt-1 mt-1"><span>Tersedia ({item.unit}):</span> <span className="font-bold text-emerald-400 font-mono">{item.availableStock}</span></div>
+                                                        {isMeasurement && (<div className="mt-1 pt-1 border-t border-slate-600 text-emerald-400 italic">Mode: {isContainerMode ? 'Stok Fisik' : 'Stok Isi (Eceran)'}</div>)}
                                                         {isFragmented && <div className="mt-1 text-amber-400 italic">⚠️ Stok terpecah/fragmented.</div>}
                                                      </div>
                                                 </div>
                                               </div>
-
                                               <div className="col-span-8 sm:col-span-5"><label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5">Keterangan</label><input type="text" value={item.keterangan} onChange={e => updateItemState(item.id, { keterangan: e.target.value })} placeholder="Spesifikasi / Keperluan..." className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700 focus:bg-white focus:border-tm-primary outline-none transition-colors placeholder:text-slate-400" /></div>
-                                              
                                               <div className="col-span-12 sm:col-span-2 relative">
                                                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-0.5 text-center">Jumlah & Unit</label>
                                                   <div className="flex rounded-md shadow-sm">
-                                                    <input 
-                                                        type="number" 
-                                                        value={item.quantity} 
-                                                        onChange={e => updateItemState(item.id, { quantity: parseFloat(e.target.value) || 0 })} 
-                                                        min={1} 
-                                                        step={1}
-                                                        onKeyDown={handleQuantityKeyDown}
-                                                        className="w-1/2 pl-3 pr-1 py-2 bg-white border border-slate-300 rounded-l-md text-sm font-bold text-center text-slate-800 focus:ring-1 focus:ring-tm-primary focus:border-tm-primary outline-none z-10" 
-                                                    />
-                                                    <select
-                                                        value={item.unit}
-                                                        onChange={(e) => handleUnitChange(item.id, e.target.value)}
-                                                        className="w-1/2 pl-2 pr-6 py-2 bg-slate-50 border-y border-r border-slate-300 rounded-r-md text-[10px] font-semibold text-slate-700 focus:ring-1 focus:ring-tm-primary focus:border-tm-primary outline-none appearance-none cursor-pointer hover:bg-slate-100"
-                                                        style={{ backgroundImage: 'none' }}
-                                                    >
-                                                        {availableUnitOptions.map(opt => (
-                                                            <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                                        ))}
-                                                    </select>
+                                                    <input type="number" value={item.quantity} onChange={e => updateItemState(item.id, { quantity: parseFloat(e.target.value) || 0 })} min={1} step={1} onKeyDown={handleQuantityKeyDown} className="w-1/2 pl-3 pr-1 py-2 bg-white border border-slate-300 rounded-l-md text-sm font-bold text-center text-slate-800 focus:ring-1 focus:ring-tm-primary focus:border-tm-primary outline-none z-10" />
+                                                    <select value={item.unit} onChange={(e) => handleUnitChange(item.id, e.target.value)} className="w-1/2 pl-2 pr-6 py-2 bg-slate-50 border-y border-r border-slate-300 rounded-r-md text-[10px] font-semibold text-slate-700 focus:ring-1 focus:ring-tm-primary focus:border-tm-primary outline-none appearance-none cursor-pointer hover:bg-slate-100" style={{ backgroundImage: 'none' }}>{availableUnitOptions.map(opt => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}</select>
                                                   </div>
                                               </div>
                                           </div>
-                                          
                                           {isMeasurement && selectedModel && (
                                               <div className="mt-2 p-2 bg-indigo-50 border border-indigo-100 rounded-md flex flex-col sm:flex-row items-start sm:items-center gap-2 text-xs text-indigo-800 animate-fade-in-up">
-                                                  <div className="flex items-center gap-2">
-                                                      <BsRulers className="w-3.5 h-3.5" />
-                                                      <span className="font-bold">Info Konversi:</span>
-                                                  </div>
-                                                  <span>
-                                                      1 {selectedModel.unitOfMeasure} (Fisik) = <strong>{selectedModel.quantityPerUnit} {selectedModel.baseUnitOfMeasure}</strong>.
-                                                  </span>
-                                                  {isContainerMode ? (
-                                                      <span className="ml-auto text-[10px] bg-indigo-200 px-2 py-0.5 rounded text-indigo-900 font-bold">
-                                                          Anda meminta {item.quantity} Unit Fisik (Total {item.quantity * (selectedModel.quantityPerUnit || 0)} {selectedModel.baseUnitOfMeasure})
-                                                      </span>
-                                                  ) : (
-                                                       <span className="ml-auto text-[10px] bg-white border border-indigo-200 px-2 py-0.5 rounded text-indigo-700">
-                                                          Permintaan Eceran (Potong)
-                                                      </span>
-                                                  )}
+                                                  <div className="flex items-center gap-2"><BsRulers className="w-3.5 h-3.5" /><span className="font-bold">Info Konversi:</span></div><span>1 {selectedModel.unitOfMeasure} (Fisik) = <strong>{selectedModel.quantityPerUnit} {selectedModel.baseUnitOfMeasure}</strong>.</span>{isContainerMode ? (<span className="ml-auto text-[10px] bg-indigo-200 px-2 py-0.5 rounded text-indigo-900 font-bold">Anda meminta {item.quantity} Unit Fisik (Total {item.quantity * (selectedModel.quantityPerUnit || 0)} {selectedModel.baseUnitOfMeasure})</span>) : (<span className="ml-auto text-[10px] bg-white border border-indigo-200 px-2 py-0.5 rounded text-indigo-700">Permintaan Eceran (Potong)</span>)}
                                               </div>
                                           )}
-
                                           {!isMeasurement && (isNewType || (currentType && !currentType.classification)) && currentCat && currentType && (
-                                            <div className="mt-2 p-2 bg-blue-50/50 border border-blue-100 rounded-md flex flex-wrap items-center gap-2 text-xs">
-                                                <span className="font-bold text-blue-700 flex items-center gap-1"><BsLightningChargeFill /> Konfigurasi:</span>
-                                                <button type="button" onClick={() => handleUpdateTypeConfig(item.id, item.tempCategoryId, item.tempTypeId, { classification: 'asset', unit: 'Unit' })} className={`px-2 py-0.5 rounded border ${currentType.classification === 'asset' ? 'bg-blue-100 border-blue-300 text-blue-800' : 'bg-white border-slate-200 text-slate-500'}`}>Device</button>
-                                                <button type="button" onClick={() => handleUpdateTypeConfig(item.id, item.tempCategoryId, item.tempTypeId, { classification: 'material', unit: 'Pcs' })} className={`px-2 py-0.5 rounded border ${currentType.classification === 'material' ? 'bg-orange-100 border-orange-300 text-orange-800' : 'bg-white border-slate-200 text-slate-500'}`}>Material</button>
-                                                <select value={item.unit} onChange={(e) => handleUpdateTypeConfig(item.id, item.tempCategoryId, item.tempTypeId, { classification: currentType.classification || 'asset', unit: e.target.value })} className="px-1 py-0.5 border border-slate-200 rounded text-slate-700 bg-white outline-none">{STANDARD_UNIT_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select>
-                                            </div>
+                                            <div className="mt-2 p-2 bg-blue-50/50 border border-blue-100 rounded-md flex flex-wrap items-center gap-2 text-xs"><span className="font-bold text-blue-700 flex items-center gap-1"><BsLightningChargeFill /> Konfigurasi:</span><button type="button" onClick={() => handleUpdateTypeConfig(item.id, item.tempCategoryId, item.tempTypeId, { classification: 'asset', unit: 'Unit' })} className={`px-2 py-0.5 rounded border ${currentType.classification === 'asset' ? 'bg-blue-100 border-blue-300 text-blue-800' : 'bg-white border-slate-200 text-slate-500'}`}>Device</button><button type="button" onClick={() => handleUpdateTypeConfig(item.id, item.tempCategoryId, item.tempTypeId, { classification: 'material', unit: 'Pcs' })} className={`px-2 py-0.5 rounded border ${currentType.classification === 'material' ? 'bg-orange-100 border-orange-300 text-orange-800' : 'bg-white border-slate-200 text-slate-500'}`}>Material</button><select value={item.unit} onChange={(e) => handleUpdateTypeConfig(item.id, item.tempCategoryId, item.tempTypeId, { classification: currentType.classification || 'asset', unit: e.target.value })} className="px-1 py-0.5 border border-slate-200 rounded text-slate-700 bg-white outline-none">{STANDARD_UNIT_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}</select></div>
                                           )}
                                       </div>
                                   </div>
@@ -602,9 +590,7 @@ export const RequestForm: React.FC<RequestFormProps> = ({
                       <div className={`p-1.5 rounded-full ${fulfillmentStatus === 'stock' ? 'bg-emerald-100' : 'bg-blue-100'}`}>{fulfillmentStatus === 'stock' ? <BsCheckCircleFill className="w-3.5 h-3.5"/> : <BsCart className="w-3.5 h-3.5"/>}</div>
                       <div>
                           <p className="font-bold">{fulfillmentStatus === 'stock' ? 'Stok Tersedia' : 'Perlu Pengadaan'}</p>
-                          <p className="opacity-90 mt-0.5">{fulfillmentStatus === 'stock' 
-                              ? 'Semua item tersedia. Item yang terpecah (fragmented) akan dialokasikan dari beberapa unit.' 
-                              : 'Sebagian item tidak tersedia. Masuk alur persetujuan pengadaan.'}</p>
+                          <p className="opacity-90 mt-0.5">{fulfillmentStatus === 'stock' ? 'Semua item tersedia. Item yang terpecah (fragmented) akan dialokasikan dari beberapa unit.' : 'Sebagian item tidak tersedia. Masuk alur persetujuan pengadaan.'}</p>
                       </div>
                   </div>
               )}

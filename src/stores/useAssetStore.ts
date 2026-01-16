@@ -27,6 +27,9 @@ interface AssetState {
   recordMovement: (movement: Omit<StockMovement, 'id' | 'balanceAfter'>) => Promise<void>;
   getStockHistory: (name: string, brand: string) => StockMovement[];
   
+  // NEW: Helper untuk mendapatkan stok spesifik teknisi
+  getTechnicianStock: (technicianName: string) => Asset[];
+
   checkAvailability: (itemName: string, brand: string, qtyNeeded: number, requestUnit?: string, excludeRequestId?: string) => { 
       physicalCount: number,    
       totalContent: number,     
@@ -52,11 +55,10 @@ interface AssetState {
   ) => Promise<{ success: boolean; errors: string[] }>;
 }
 
-// --- UTILITY: INTEGER ENFORCEMENT ---
-// Force Integer. Untuk stok fisik/uang gunakan Round/Floor. Untuk konsumsi gunakan Ceil (Safety).
+// --- UTILITY: INTEGER ENFORCEMENT & SAFETY ---
 const toInt = (num: number | undefined | null): number => {
-    if (num === undefined || num === null) return 0;
-    return Math.round(num); // Standard rounding for general numbers
+    if (num === undefined || num === null || isNaN(num)) return 0;
+    return Math.round(num); 
 };
 
 const sanitizeBulkAsset = (asset: Asset | Partial<Asset>, categories: AssetCategory[], existingAsset?: Asset): Asset | Partial<Asset> => {
@@ -163,12 +165,12 @@ export const useAssetStore = create<AssetState>()(
 
         const data = sanitizeBulkAsset(rawData, get().categories, originalAsset);
         
-        // STRICT INTEGER ENFORCEMENT
+        // STRICT INTEGER ENFORCEMENT & NaN Safety
         if (data.currentBalance !== undefined) {
-            data.currentBalance = toInt(data.currentBalance);
+            data.currentBalance = Math.max(0, toInt(data.currentBalance));
         }
         if (data.initialBalance !== undefined) {
-            data.initialBalance = toInt(data.initialBalance);
+            data.initialBalance = Math.max(0, toInt(data.initialBalance));
         }
         
         const updated = current.map(a => a.id === id ? { ...a, ...data } : a);
@@ -299,10 +301,9 @@ export const useAssetStore = create<AssetState>()(
       },
 
       recordMovement: async (movementData) => {
-          // STRICT INTEGER ON MOVEMENT
           const finalMovement = {
               ...movementData,
-              quantity: toInt(movementData.quantity)
+              quantity: Math.max(0, toInt(movementData.quantity))
           };
           const updatedMovements = await api.recordStockMovement(finalMovement);
           set({ stockMovements: updatedMovements as StockMovement[] });
@@ -314,12 +315,20 @@ export const useAssetStore = create<AssetState>()(
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       },
       
+      // NEW: Get Technician Specific Stock
+      getTechnicianStock: (technicianName) => {
+          return get().assets.filter(a => 
+              (a.status === AssetStatus.IN_CUSTODY || a.status === AssetStatus.IN_USE) && 
+              a.currentUser === technicianName
+          );
+      },
+      
       checkAvailability: (itemName, brand, qtyNeeded, requestUnit, excludeRequestId) => {
+          // ... (Logic ATP existing tetap sama) ...
           const assets = get().assets;
           const categories = get().categories;
           const requests = useRequestStore.getState().requests;
           
-          // Ensure Integer inputs
           const qtyNeededInt = Math.ceil(qtyNeeded);
           
           let isMeasurement = false;
@@ -362,6 +371,7 @@ export const useAssetStore = create<AssetState>()(
           }
 
           const totalPhysicalCount = allPhysicalAssets.length;
+          // SAFE CALCULATION
           const totalPhysicalContent = toInt(allPhysicalAssets.reduce((sum, a) => sum + (a.currentBalance ?? 0), 0));
 
           const activeRequests = requests.filter(r => 
@@ -480,7 +490,6 @@ export const useAssetStore = create<AssetState>()(
           const { assets, categories } = get();
           const errors: string[] = [];
           
-          // Phase 1: VALIDATION & PLANNING
           const actorName = context.technicianName || useAuthStore.getState().currentUser?.name || 'System';
           
           type PlannedUpdate = {
@@ -493,72 +502,77 @@ export const useAssetStore = create<AssetState>()(
           const tempBalances: Record<string, number> = {}; 
 
           for (const mat of materials) {
+              let isBulk = false;
               let isMeasurement = false;
+
               for (const cat of categories) {
                   for (const type of cat.types) {
                       const model = type.standardItems?.find(i => i.name === mat.itemName && i.brand === mat.brand);
-                      if (model && model.bulkType === 'measurement') {
-                          isMeasurement = true;
+                      if (model) {
+                          if (type.trackingMethod === 'bulk') isBulk = true;
+                          if (model.bulkType === 'measurement') isMeasurement = true;
                           break;
                       }
                   }
-                  if (isMeasurement) break;
+                  if (isBulk) break;
               }
 
-              // STRICT INTEGER: Material Consumption via Form must be integer
-              // However, if we want to support partial meters in field but integer in warehouse,
-              // we should apply CEILING here to be safe (Expense-off principle).
-              // If tech used 0.5m, we deduct 1m.
               const qtyToDeduct = Math.ceil(mat.quantity);
-
               let targetAssets: Asset[] = [];
 
-              // 1. Try Specific ID
+              // SMART LOGIC: Auto-Detect Source
               if (mat.materialAssetId) {
+                  // 1. Jika User memilih source spesifik, gunakan itu.
                   const specificAsset = assets.find(a => a.id === mat.materialAssetId);
-                  if (specificAsset && (
-                      specificAsset.status === AssetStatus.IN_STORAGE || 
-                      specificAsset.status === AssetStatus.IN_CUSTODY || 
-                      specificAsset.status === AssetStatus.IN_USE
-                  )) {
+                  if (specificAsset) {
                       targetAssets = [specificAsset];
                   } else {
                        errors.push(`Stok spesifik ${mat.materialAssetId} (${mat.itemName}) tidak valid/ditemukan.`);
                        continue; 
                   }
-              } 
-              // 2. Fallback: Auto-find (FIFO)
-              else {
+              } else {
+                  // 2. Jika tidak, cari stok milik TEKNISI dulu (Custody), baru Gudang.
                   targetAssets = assets
                       .filter(a => {
                           const isMatch = a.name === mat.itemName && a.brand === mat.brand;
                           if (!isMatch) return false;
-                          const isOwnAsset = a.currentUser === actorName && (a.status === AssetStatus.IN_CUSTODY || a.status === AssetStatus.IN_USE);
+                          
+                          // Prioritas 1: Dipegang Teknisi
+                          const isTechnicianCustody = a.currentUser === actorName && (a.status === AssetStatus.IN_CUSTODY || a.status === AssetStatus.IN_USE);
+                          
+                          // Prioritas 2: Di Gudang
                           const isInStorage = a.status === AssetStatus.IN_STORAGE;
-                          return isOwnAsset || isInStorage;
+                          
+                          return isTechnicianCustody || isInStorage;
                       })
                       .sort((a, b) => {
+                           // Sort: Teknisi Custody First -> Gudang Second
                            const aIsOwn = a.currentUser === actorName;
                            const bIsOwn = b.currentUser === actorName;
                            if (aIsOwn && !bIsOwn) return -1;
                            if (!aIsOwn && bIsOwn) return 1;
                            
+                           // Sort: Partial First (Habiskan sisa dulu)
                            if (isMeasurement) {
                                 const aPartial = (a.currentBalance ?? 0) < (a.initialBalance ?? 0);
                                 const bPartial = (b.currentBalance ?? 0) < (b.initialBalance ?? 0);
                                 if (aPartial && !bPartial) return -1;
                                 if (!aPartial && bPartial) return 1;
                            }
+                           
+                           // FIFO (Oldest first)
                            return new Date(a.registrationDate).getTime() - new Date(b.registrationDate).getTime();
                       });
               }
 
               if (targetAssets.length === 0) {
-                  errors.push(`Stok ${mat.itemName} tidak tersedia.`);
+                  errors.push(`Stok ${mat.itemName} tidak tersedia untuk teknisi ${actorName} maupun di Gudang.`);
                   continue;
               }
 
-              if (isMeasurement) {
+              // UNIFIED BULK LOGIC (Count OR Measurement)
+              // Treated same: deduct from balance/quantity of a single record if possible
+              if (isBulk) {
                   let remainingNeed = qtyToDeduct;
                   
                   for (const asset of targetAssets) {
@@ -571,6 +585,7 @@ export const useAssetStore = create<AssetState>()(
                       if (currentEffectiveBalance <= 0) continue;
                       
                       const isFromCustody = asset.status === AssetStatus.IN_CUSTODY || (asset.status === AssetStatus.IN_USE && asset.currentUser === actorName);
+                      
                       const movementType = isFromCustody ? 'OUT_USAGE_CUSTODY' : 'OUT_INSTALLATION';
                       const locationContext = isFromCustody ? 'CUSTODY' : 'WAREHOUSE';
 
@@ -584,8 +599,9 @@ export const useAssetStore = create<AssetState>()(
                           usedAmount = remainingNeed;
                           remainingNeed = 0;
                       } else {
+                          // Asset habis terpakai
                           updates.currentBalance = 0;
-                          updates.status = AssetStatus.CONSUMED;
+                          updates.status = AssetStatus.CONSUMED; 
                           tempBalances[asset.id] = 0;
                           
                           usedAmount = toInt(currentEffectiveBalance);
@@ -614,7 +630,7 @@ export const useAssetStore = create<AssetState>()(
                       errors.push(`Stok fisik ${mat.itemName} kurang ${remainingNeed} ${mat.unit}.`);
                   }
               } else {
-                  // Count Logic
+                  // INDIVIDUAL UNIT LOGIC (Devices with SN)
                   const qtyToConsume = Math.min(qtyToDeduct, targetAssets.length);
                   if (qtyToConsume < qtyToDeduct) {
                        errors.push(`Stok fisik ${mat.itemName} kurang ${qtyToDeduct - qtyToConsume} ${mat.unit}.`);
@@ -631,7 +647,11 @@ export const useAssetStore = create<AssetState>()(
                           
                           plan.push({
                               assetId: item.id,
-                              updates: { status: AssetStatus.IN_USE, currentUser: context.customerId || null, location: context.location || 'Digunakan' },
+                              updates: { 
+                                  status: AssetStatus.IN_USE, 
+                                  currentUser: context.customerId || null, 
+                                  location: context.location || 'Digunakan' 
+                              },
                               movementLog: {
                                    assetName: mat.itemName,
                                    brand: mat.brand,
@@ -650,14 +670,12 @@ export const useAssetStore = create<AssetState>()(
               }
           }
 
-          // Phase 2: EXECUTION
           if (errors.length > 0) {
               return { success: false, errors };
           }
           
           const currentAssets = get().assets;
           const updatedAssets = currentAssets.map(a => {
-              // FIX: Use filter to get ALL updates for this asset (multi-cut support)
               const assetPlans = plan.filter(p => p.assetId === a.id);
               if (assetPlans.length === 0) return a;
               

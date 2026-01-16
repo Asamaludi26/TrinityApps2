@@ -382,18 +382,21 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
             mainColClassName={isActionSidebarExpanded ? 'lg:col-span-8' : 'lg:col-span-11'}
             asideColClassName={isActionSidebarExpanded ? 'lg:col-span-4' : 'lg:col-span-1'}
             aside={
-                <RequestStatusSidebar 
-                    {...props} 
-                    request={request}
-                    isExpanded={isActionSidebarExpanded} 
-                    onToggleVisibility={() => setIsActionSidebarExpanded(prev => !prev)}
-                    onFinalSubmit={handleFinalSubmitForApproval}
-                    isPurchaseFormValid={isPurchaseFormValid}
-                    onOpenCancellationModal={() => setIsCancelModalOpen(true)}
-                    onOpenStaging={handleStagingAction} 
-                    isStagingComplete={isStagingComplete}
-                    onShowPreview={onShowPreview}
-                />
+                /* UX Improvement: Sticky sidebar for easy access to actions */
+                <div className="sticky top-20"> 
+                    <RequestStatusSidebar 
+                        {...props} 
+                        request={request}
+                        isExpanded={isActionSidebarExpanded} 
+                        onToggleVisibility={() => setIsActionSidebarExpanded(prev => !prev)}
+                        onFinalSubmit={handleFinalSubmitForApproval}
+                        isPurchaseFormValid={isPurchaseFormValid}
+                        onOpenCancellationModal={() => setIsCancelModalOpen(true)}
+                        onOpenStaging={handleStagingAction} 
+                        isStagingComplete={isStagingComplete}
+                        onShowPreview={onShowPreview}
+                    />
+                </div>
             }
         >
             <div className="space-y-6">
@@ -446,17 +449,18 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                         <p className="text-sm font-medium text-slate-400 mt-1">Dokumen ID: <span className="font-mono text-slate-600 font-bold">{request.docNumber || request.id}</span></p>
                     </div>
                     
+                    {/* UI Improvement: Compact Grid for Header Info */}
                     <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-y-6 gap-x-8">
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-y-6 gap-x-8">
                             <PreviewItem label="No. Request" value={<div className="font-mono font-bold text-slate-700 flex items-center gap-2 text-base"><BsHash className="text-slate-400"/> {request.id}</div>} />
                             <PreviewItem label="No. Dokumen" value={<div className="font-mono text-slate-700 flex items-center gap-2"><BsFileEarmarkText className="text-slate-400"/> {request.docNumber || '-'}</div>} />
-                            <PreviewItem label="Tanggal Request" value={<div className="flex items-center gap-2"><BsCalendarEvent className="text-slate-400"/> {new Date(request.requestDate).toLocaleString('id-ID')}</div>} />
+                            <PreviewItem label="Tanggal" value={<div className="flex items-center gap-2"><BsCalendarEvent className="text-slate-400"/> {new Date(request.requestDate).toLocaleString('id-ID')}</div>} />
                             <PreviewItem label="Pemohon" value={<div className="flex items-center gap-2"><BsPerson className="text-slate-400"/> {request.requester}</div>} />
                             <PreviewItem label="Divisi" value={<div className="flex items-center gap-2"><BsBuilding className="text-slate-400"/> {request.division}</div>} />
                             <PreviewItem label="Tipe Order"><OrderIndicator order={request.order} /></PreviewItem>
-                            <PreviewItem label="Status Saat Ini"><RequestStatusIndicator status={request.status} /></PreviewItem>
+                            <PreviewItem label="Status"><RequestStatusIndicator status={request.status} /></PreviewItem>
                             {request.order.type === 'Project Based' && <PreviewItem label="Nama Proyek" value={<span className="font-bold text-slate-800">{request.order.project}</span>} />}
-                             {request.order.type === 'Urgent' && <PreviewItem label="Justifikasi Urgent" fullWidth><p className="text-sm font-medium text-amber-800 bg-amber-50 p-3 rounded-lg border border-amber-100 italic">"{request.order.justification}"</p></PreviewItem>}
+                            {request.order.type === 'Urgent' && <PreviewItem label="Justifikasi" fullWidth><p className="text-sm font-medium text-amber-800 bg-amber-50 p-3 rounded-lg border border-amber-100 italic">"{request.order.justification}"</p></PreviewItem>}
                         </div>
                     </div>
                     
@@ -481,26 +485,21 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                         const approvedQuantity = itemStatus?.approvedQuantity;
                                         const hasApprovalRecord = typeof approvedQuantity === 'number';
                                         
-                                        // LOGIC FIX: "Adjusted" means explicit change (Value Diff). 
-                                        // Prevents strikethrough if values are same.
                                         const isAdjusted = hasApprovalRecord && approvedQuantity !== item.quantity;
                                         
                                         const isRejected = hasApprovalRecord && approvedQuantity === 0;
                                         const isPartiallyApproved = isAdjusted && approvedQuantity! > 0 && approvedQuantity! < item.quantity;
                                         const isStockAllocated = itemStatus?.status === 'stock_allocated';
                                         
-                                        // 1. Resolve Category, Type & Model for Config
                                         let categoryName = '-';
                                         let typeName = '-';
                                         let displayUnit = item.unit || 'Unit'; 
                                         let isMeasurement = false;
                                         let isMaterial = false;
 
-                                        // Lookup Logic: Robust search
                                         let category = assetCategories.find(c => c.id.toString() === item.categoryId?.toString());
                                         let type = category?.types.find(t => t.id.toString() === item.typeId?.toString());
                                         
-                                        // Fallback Lookup by Name if IDs missing
                                         if (!category || !type) {
                                             for (const cat of assetCategories) {
                                                 for (const typ of cat.types) {
@@ -522,21 +521,16 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                         if (type) {
                                             typeName = type.name;
                                             isMaterial = type.classification === 'material' || type.trackingMethod === 'bulk';
-                                            
-                                            // Determine Unit & Measurement Flag
                                             const model = type.standardItems?.find(m => m.name === item.itemName && m.brand === item.itemTypeBrand);
                                             if (model && model.bulkType === 'measurement') {
                                                 isMeasurement = true;
                                             }
                                         }
 
-                                        // DISPLAY UNIT LOGIC FIX: 
-                                        // Always prioritize user selected unit from RequestItem
                                         if (item.unit && item.unit !== 'Unit') {
                                             displayUnit = item.unit;
                                         }
 
-                                        // Cek progress registrasi per item
                                         const registeredCount = request.partiallyRegisteredItems?.[item.id] || 0;
                                         const targetQty = approvedQuantity ?? item.quantity;
                                         const isItemFullyRegistered = !isRejected && !isStockAllocated && registeredCount >= targetQty;
@@ -553,7 +547,6 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                                     <div className="flex flex-col gap-0.5">
                                                         <span className="text-slate-700 font-bold text-xs">{categoryName}</span>
                                                         <span className="text-slate-500 font-normal text-xs">{typeName}</span>
-                                                        {/* Type Badge */}
                                                         <div className="mt-1">
                                                             {isMeasurement ? (
                                                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] bg-indigo-50 text-indigo-700 border border-indigo-100 font-bold uppercase tracking-wider">
@@ -591,7 +584,6 @@ const NewRequestDetailPage: React.FC<RequestDetailPageProps> = (props) => {
                                                         {isAdjusted ? (
                                                             <><span className="text-xs text-slate-400 line-through decoration-slate-300">{item.quantity}</span><strong className={`text-lg font-bold ${isRejected ? 'text-red-500' : 'text-amber-600'}`}>{approvedQuantity}</strong></>
                                                         ) : (
-                                                            // Display the CURRENT EFFECTIVE quantity (Approved if exists, else Original)
                                                             <strong className="text-lg font-bold text-slate-800">{approvedQuantity ?? item.quantity}</strong>
                                                         )}
                                                         <span className="text-[9px] uppercase font-bold text-slate-500 mt-0.5 tracking-wide bg-slate-100 px-1.5 rounded">{displayUnit}</span>

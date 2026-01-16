@@ -22,6 +22,7 @@ import { BsBoxSeam, BsWrench, BsLightningFill, BsArrowDown, BsExclamationTriangl
 // New Imports
 import { useFileAttachment } from '../../../hooks/useFileAttachment';
 import { MAX_FILE_SIZE_MB } from '../../../utils/fileUtils';
+import { useAssetStore } from '../../../stores/useAssetStore'; // Added store import
 
 interface MaintenanceFormProps {
     currentUser: User;
@@ -40,6 +41,7 @@ const allWorkTypes = ['Ganti Perangkat', 'Splicing FO', 'Tarik Ulang Kabel', 'Ga
 
 const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customers, assets, users, maintenances, onSave, onCancel, isLoading, prefillCustomerId, prefillAssetId }) => {
     const { getCustomerAssets, getReplacementOptions, materialOptions, categories } = useCustomerAssetLogic();
+    const consumeMaterials = useAssetStore(state => state.consumeMaterials);
 
     const [maintenanceDate, setMaintenanceDate] = useState<Date | null>(new Date());
     const [docNumber, setDocNumber] = useState('');
@@ -63,7 +65,7 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
     type AdditionalMaterialItem = { 
         id: number; 
         modelKey: string; 
-        quantity: number | '';
+        quantity: number | ''; 
         unit: string;
         materialAssetId?: string;
     };
@@ -322,6 +324,33 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
             return;
         }
 
+        // --- NEW: VALIDATE STOCK FOR MATERIALS (COUNT & MEASUREMENT) ---
+        const finalMaterialsUsed: MaintenanceMaterial[] = [];
+        additionalMaterials.filter(m => m.modelKey && m.quantity).forEach(m => {
+             const [name, brand] = m.modelKey.split('|');
+             finalMaterialsUsed.push({
+                 materialAssetId: m.materialAssetId,
+                 itemName: name,
+                 brand: brand,
+                 quantity: Number(m.quantity),
+                 unit: m.unit
+             });
+        });
+
+        // Try consume before proceeding
+        if (finalMaterialsUsed.length > 0) {
+            const consumeResult = await consumeMaterials(finalMaterialsUsed, {
+                 customerId: customer.id,
+                 location: `Terpasang di: ${customer.name}`,
+                 technicianName: technician
+            });
+            
+            if (!consumeResult.success) {
+                consumeResult.errors.forEach(err => addNotification(err, 'error'));
+                return; // Stop if stock insufficient
+            }
+        }
+
         const selectedAssetsInfo = selectedAssetIds.map(id => {
             const asset = assets.find(a => a.id === id);
             return { assetId: id, assetName: asset?.name || 'N/A' };
@@ -336,18 +365,6 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
         // Convert files to Base64
         const processedAttachments = await processAttachmentsForSubmit();
         
-        const finalMaterialsUsed: MaintenanceMaterial[] = [];
-        additionalMaterials.filter(m => m.modelKey && m.quantity).forEach(m => {
-             const [name, brand] = m.modelKey.split('|');
-             finalMaterialsUsed.push({
-                 materialAssetId: m.materialAssetId,
-                 itemName: name,
-                 brand: brand,
-                 quantity: Number(m.quantity),
-                 unit: m.unit
-             });
-        });
-
         onSave({
             maintenanceDate: maintenanceDate!.toISOString(),
             requestNumber: requestNumber || undefined,
@@ -582,7 +599,16 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                                             </div>
                                         </td>
                                         <td className="px-4 py-3 align-top">
-                                            <button type="button" onClick={() => handleOpenAllocationModal(index, material.modelKey)} disabled={!material.modelKey} className={`w-full h-[38px] px-2 text-xs font-semibold rounded-lg border flex items-center justify-center gap-1 transition-colors ${material.materialAssetId ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'} ${!material.modelKey ? 'opacity-50 cursor-not-allowed' : ''}`} title="Pilih sumber stok spesifik (Drum/Box)"><ArchiveBoxIcon className="w-3.5 h-3.5" />{material.materialAssetId ? 'Ubah' : 'Otomatis (FIFO)'}</button>
+                                            <button 
+                                                type="button" 
+                                                onClick={() => handleOpenAllocationModal(index, material.modelKey)} 
+                                                disabled={!material.modelKey} 
+                                                className={`w-full h-[38px] px-2 text-xs font-semibold rounded-lg border flex items-center justify-center gap-1 transition-colors ${material.materialAssetId ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'} ${!material.modelKey ? 'opacity-50 cursor-not-allowed' : ''}`} 
+                                                title="Pilih sumber stok spesifik (Drum/Box)"
+                                            >
+                                                <ArchiveBoxIcon className="w-3.5 h-3.5" />
+                                                {material.materialAssetId ? 'Ubah' : 'Otomatis (FIFO)'}
+                                            </button>
                                         </td>
                                         <td className="px-4 py-3 text-center align-top">
                                             <button type="button" onClick={() => removeAdditionalMaterial(material.id)} className="p-2 text-red-500 rounded-full hover:bg-red-100 bg-white border border-gray-200"><TrashIcon className="w-4 h-4" /></button>
@@ -694,7 +720,8 @@ const MaintenanceForm: React.FC<MaintenanceFormProps> = ({ currentUser, customer
                         ? additionalMaterials[allocationModal.itemIndex]?.materialAssetId 
                         : undefined
                     }
-                    currentUser={currentUser} // Pass currentUser here
+                    currentUser={currentUser} 
+                    ownerName={technician} // Pass technician name to filter stock
                 />
             )}
         </>

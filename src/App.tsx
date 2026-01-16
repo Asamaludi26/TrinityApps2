@@ -62,7 +62,7 @@ const AppContent: React.FC = () => {
         useTransactionStore.getState().fetchTransactions(),
         useMasterDataStore.getState().fetchMasterData(),
         useNotificationStore.getState().fetchNotifications(),
-        new Promise(resolve => setTimeout(resolve, 800)) 
+        new Promise(resolve => setTimeout(resolve, 300)) // Reduced delay significantly for snappier load
       ]);
       setIsDataLoading(false);
     };
@@ -73,11 +73,12 @@ const AppContent: React.FC = () => {
   // --- Transition Wrapper ---
   const setActivePage = (page: Page, initialState?: any) => {
     setPageLoading(true);
-    // Simulasi delay request server saat berpindah halaman
+    // OPTIMIZATION: Reduced artificial delay from 600ms to 50ms.
+    // This allows just enough time for the loading bar to start rendering without making the app feel sluggish.
     setTimeout(() => {
         setStoreActivePage(page, initialState);
         setPageLoading(false);
-    }, 600); 
+    }, 50); 
   };
 
   // --- Global Modal States ---
@@ -157,7 +158,8 @@ const AppContent: React.FC = () => {
 
   const renderPage = () => {
     if (currentUser.role === "Staff" && staffRestrictedPages.includes(activePage)) {
-      return <PermissionDeniedPage />;
+      // FIX: Pass onBack to avoid dead-end page
+      return <PermissionDeniedPage onBack={() => setActivePage('dashboard')} />;
     }
 
     switch (activePage) {

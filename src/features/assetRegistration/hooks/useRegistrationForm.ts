@@ -51,6 +51,7 @@ export const useRegistrationForm = ({
         currentUser: null,
         notes: '',
         attachments: [],
+        // Default: Always have 1 empty item ready
         bulkItems: [{ id: generateUUID(), serialNumber: '', macAddress: '' }],
         quantity: 1,
         relatedRequestId: null
@@ -86,6 +87,31 @@ export const useRegistrationForm = ({
         return 0;
     }, [assets, selectedType, selectedModel, formData.assetName, formData.brand]);
 
+    // --- AUTO-INIT MEASUREMENT ROW ---
+    // UX Improvement: When switching to a measurement model, ensure at least 1 row exists with default quantity
+    useEffect(() => {
+        if (!prefillData && selectedModel?.bulkType === 'measurement') {
+             // Jika manual input (bukan dari request) dan tipe measurement
+             // Pastikan ada minimal 1 row, dan jika row itu kosong, isi defaultnya
+             setFormData(prev => {
+                 const currentItems = prev.bulkItems;
+                 if (currentItems.length === 0 || (currentItems.length === 1 && !currentItems[0].initialBalance)) {
+                     return {
+                         ...prev,
+                         bulkItems: [{
+                             id: generateUUID(),
+                             serialNumber: `BATCH-${Date.now().toString().slice(-6)}`,
+                             macAddress: '',
+                             initialBalance: selectedModel.quantityPerUnit || 1000,
+                             currentBalance: selectedModel.quantityPerUnit || 1000
+                         }]
+                     };
+                 }
+                 return prev;
+             });
+        }
+    }, [selectedModel, prefillData]);
+
     // --- EFFECTS ---
     useEffect(() => {
         if (prefillData?.request && prefillData.itemToRegister) {
@@ -117,17 +143,52 @@ export const useRegistrationForm = ({
             
             const isBulkTracking = foundType?.trackingMethod === 'bulk';
             
-            // Fix: Detect if it is 'count' based (e.g. connector) or 'measurement' based (e.g. cable)
             const modelData = foundType?.standardItems?.find(m => m.name === itemToRegister.itemName && m.brand === itemToRegister.itemTypeBrand);
             const isMeasurement = isBulkTracking && modelData?.bulkType === 'measurement';
             const isCount = isBulkTracking && !isMeasurement;
 
-            // If Count type: init empty bulk items (will default to 1 dummy later), just prep qty
-            // If Individual: init N items
-            // If Measurement: init empty (wait for generator)
-            const initialBulkItems = isBulkTracking 
-                ? (isCount ? [{ id: generateUUID(), serialNumber: '', macAddress: '' }] : [])
-                : Array.from({ length: quantityToRegister }, () => ({ id: generateUUID(), serialNumber: '', macAddress: '' }));
+            // --- SMART PREFILL LOGIC ---
+            let initialBulkItems: any[] = [];
+            let finalQuantity = quantityToRegister;
+
+            if (isBulkTracking) {
+                if (isMeasurement) {
+                    const stdLength = modelData?.quantityPerUnit || 1000;
+                    const reqUnit = itemToRegister.unit;
+                    const containerUnit = modelData?.unitOfMeasure || 'Hasbal'; 
+
+                    // Skenario A: Request dalam satuan Container
+                    if (reqUnit === containerUnit) {
+                        finalQuantity = quantityToRegister; 
+                        initialBulkItems = Array.from({ length: quantityToRegister }, (_, i) => ({
+                            id: generateUUID(),
+                            serialNumber: `AUTO-BATCH-${Date.now().toString().slice(-5)}-${i + 1}`,
+                            macAddress: '',
+                            initialBalance: stdLength,
+                            currentBalance: stdLength
+                        }));
+                    } 
+                    // Skenario B: Request dalam satuan Base (Meter)
+                    else {
+                        // Langsung buat 1 item besar jika user tidak minta dipecah (Simplified UX)
+                        // User masih bisa menggunakan tombol "Generate" manual jika ingin memecahnya
+                        finalQuantity = 1; 
+                        initialBulkItems = [{
+                            id: generateUUID(),
+                            serialNumber: `AUTO-BATCH-${Date.now().toString().slice(-5)}`,
+                            macAddress: '',
+                            initialBalance: quantityToRegister,
+                            currentBalance: quantityToRegister
+                        }];
+                    }
+                } else if (isCount) {
+                     initialBulkItems = [{ id: generateUUID(), serialNumber: '', macAddress: '' }];
+                     finalQuantity = quantityToRegister;
+                }
+            } else {
+                initialBulkItems = Array.from({ length: quantityToRegister }, () => ({ id: generateUUID(), serialNumber: '', macAddress: '' }));
+                finalQuantity = quantityToRegister;
+            }
 
             const details = request.purchaseDetails?.[itemToRegister.id];
 
@@ -141,8 +202,8 @@ export const useRegistrationForm = ({
                 brand: itemToRegister.itemTypeBrand,
                 requestDescription: itemToRegister.keterangan || '',
                 relatedRequestDocNumber: request.docNumber || request.id,
-                quantity: quantityToRegister,
-                bulkItems: initialBulkItems,
+                quantity: finalQuantity, 
+                bulkItems: initialBulkItems.length > 0 ? initialBulkItems : [{ id: generateUUID(), serialNumber: '', macAddress: '' }], // Safety fallback
                 purchasePrice: canViewPrice && details ? (details.purchasePrice as number) : null,
                 vendor: details?.vendor || '',
                 poNumber: details?.poNumber || '',
@@ -324,16 +385,20 @@ export const useRegistrationForm = ({
         if (isBulkTracking) {
              if (isMeasurementType) {
                  if (finalBulkItems.length === 0) {
-                     addNotification('Harap generate rincian item (batch generator) terlebih dahulu.', 'error');
-                     return;
+                     // Auto-fix empty list for measurement
+                      finalBulkItems = [{ 
+                          id: generateUUID(), 
+                          serialNumber: `AUTO-${Date.now()}`, 
+                          macAddress: '',
+                          initialBalance: targetModel?.quantityPerUnit || 1000,
+                          currentBalance: targetModel?.quantityPerUnit || 1000
+                     }];
                  }
                  if (finalBulkItems.some(i => !i.initialBalance || i.initialBalance <= 0)) {
                       addNotification('Semua item measurement harus memiliki saldo awal (Isi/Panjang).', 'error');
                       return;
                  }
              } else {
-                 // For Count tracking (e.g. connectors), we ensure 1 dummy item exists.
-                 // This ensures newAssets.length >= 1 in RegistrationPage.
                  if (finalBulkItems.length === 0) {
                      finalBulkItems = [{ id: generateUUID(), serialNumber: '', macAddress: '' }];
                  }

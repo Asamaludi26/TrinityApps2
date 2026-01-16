@@ -12,7 +12,7 @@ import { TrashIcon } from '../../../components/icons/TrashIcon';
 import { SpinnerIcon } from '../../../components/icons/SpinnerIcon';
 import { generateDocumentNumber } from '../../../utils/documentNumberGenerator';
 import { useCustomerAssetLogic } from '../hooks/useCustomerAssetLogic';
-import { BsBoxSeam, BsLightningFill, BsInfoCircle, BsExclamationTriangle } from 'react-icons/bs';
+import { BsBoxSeam, BsExclamationTriangle } from 'react-icons/bs';
 
 // New Imports
 import { useFileAttachment } from '../../../hooks/useFileAttachment';
@@ -151,10 +151,29 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!selectedAsset || !selectedCustomer) {
-            addNotification('Harap pilih aset yang akan ditarik.', 'error');
+        
+        // DEEP INPUT VALIDATION
+        if (!selectedCustomerId) {
+            addNotification('Pelanggan wajib dipilih.', 'error');
             return;
         }
+        if (!selectedAsset) {
+            addNotification('Pilih aset yang akan ditarik (Dismantle).', 'error');
+            return;
+        }
+        if (!technician) {
+            addNotification('Nama teknisi wajib diisi.', 'error');
+            return;
+        }
+        if (!dismantleDate) {
+            addNotification('Tanggal penarikan wajib diisi.', 'error');
+            return;
+        }
+        if (!retrievedCondition) {
+            addNotification('Kondisi aset wajib dipilih.', 'error');
+            return;
+        }
+
         setIsSubmitting(true);
         
         try {
@@ -166,11 +185,11 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
                 requestNumber: requestNumber || undefined,
                 assetId: selectedAsset.id,
                 assetName: selectedAsset.name,
-                dismantleDate: dismantleDate!.toISOString().split('T')[0],
+                dismantleDate: dismantleDate.toISOString().split('T')[0],
                 technician,
-                customerName: selectedCustomer.name,
-                customerId: selectedCustomer.id,
-                customerAddress: selectedCustomer.address,
+                customerName: selectedCustomer!.name,
+                customerId: selectedCustomer!.id,
+                customerAddress: selectedCustomer!.address,
                 retrievedCondition,
                 notes: notes.trim() || null,
                 acknowledger: null, 
@@ -187,7 +206,7 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
     // --- SUB-COMPONENTS ---
      const ActionButtons: React.FC<{ formId?: string }> = ({ formId }) => (
         <>
-            <button type="button" onClick={onCancel} className="px-4 py-2 text-sm font-semibold text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50">
+            <button type="button" onClick={onCancel} className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg shadow-sm hover:bg-gray-50">
                 Batal
             </button>
             <button 
@@ -230,7 +249,7 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
                     <h3 className="text-base font-semibold text-gray-800 mb-4">Informasi Pelanggan</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">Pilih Pelanggan</label>
+                            <label className="block text-sm font-medium text-gray-700">Pilih Pelanggan <span className="text-red-500">*</span></label>
                             <CustomSelect
                                 options={customerOptions}
                                 value={selectedCustomerId}
@@ -310,11 +329,11 @@ const DismantleForm: React.FC<DismantleFormProps> = ({ currentUser, dismantles, 
                 <div className="p-4 border-t border-b border-gray-200">
                     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">Teknisi</label>
+                            <label className="block text-sm font-medium text-gray-700">Teknisi <span className="text-red-500">*</span></label>
                             <CustomSelect options={technicianOptions} value={technician} onChange={setTechnician} />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">Kondisi Aset Saat Ditarik</label>
+                            <label className="block text-sm font-medium text-gray-700">Kondisi Aset Saat Ditarik <span className="text-red-500">*</span></label>
                             <CustomSelect options={Object.values(AssetCondition).map(c => ({ value: c, label: c }))} value={retrievedCondition} onChange={v => setRetrievedCondition(v as AssetCondition)} />
                         </div>
                         <div className="md:col-span-2">

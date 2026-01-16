@@ -306,6 +306,9 @@ export const AssetPreview: React.FC<AssetPreviewProps> = ({ asset, canViewPrice,
 
     // SECURITY: Determine if user can see sensitive/operation details
     const isOpsAdmin = currentUser?.role === 'Admin Logistik' || currentUser?.role === 'Super Admin';
+    
+    // Logic: Identify if this is a "Potongan" (Child Asset)
+    const isPotongan = asset.id.includes('-PART-') || asset.name.includes('(Potongan)');
 
     // Kalkulasi Stok Model yang Sama
     const stockStats = useMemo(() => {
@@ -347,8 +350,8 @@ export const AssetPreview: React.FC<AssetPreviewProps> = ({ asset, canViewPrice,
                         {/* SMART CONTEXT CARD */}
                         <SmartContextCard asset={asset} onShowPreview={onShowPreview} showSensitiveData={isOpsAdmin} />
 
-                         {/* STOCK INFO CARD - ONLY FOR OPS ADMIN */}
-                        {isOpsAdmin && (
+                         {/* STOCK INFO CARD - ONLY FOR OPS ADMIN & NOT FOR POTONGAN */}
+                        {isOpsAdmin && !isPotongan && (
                             <div className={`flex items-start gap-4 p-4 rounded-xl border ${stockStats.inStorage > 0 ? 'bg-blue-50/50 border-blue-200' : 'bg-red-50/50 border-red-200'}`}>
                                 <div className={`p-2 rounded-full ${stockStats.inStorage > 0 ? 'bg-blue-100 text-blue-600' : 'bg-red-100 text-red-600'}`}>
                                     <ArchiveBoxIcon className="w-5 h-5" />
@@ -372,8 +375,8 @@ export const AssetPreview: React.FC<AssetPreviewProps> = ({ asset, canViewPrice,
                             </div>
                         )}
 
-                        {/* MEASUREMENT INFO CARD - FOR STAFF (When Admin View is hidden) */}
-                        {!isOpsAdmin && stockStats.isMeasurement && (
+                        {/* MEASUREMENT INFO CARD - FOR POTONGAN ITEMS */}
+                        {stockStats.isMeasurement && (
                             <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
                                 <div className="flex items-center gap-2 mb-3">
                                     <div className="p-1.5 bg-indigo-100 text-indigo-600 rounded">

@@ -1,3 +1,4 @@
+
 import { useMemo } from 'react';
 import { Asset, AssetStatus } from '../../../types';
 
@@ -17,6 +18,12 @@ export const useStockAnalysis = (assets: Asset[], thresholds: Record<string, num
 
         // 1. Aggregate Stock Counts
         assets.forEach(asset => {
+            // LOGIC FIX: Abaikan aset pecahan (Potongan) dari perhitungan alert stok
+            // Kita hanya ingin memantau stok Kontainer Utama (Gudang)
+            if (asset.id.includes('-PART-') || asset.name.includes('(Potongan)')) {
+                return;
+            }
+
             const key = `${asset.name}|${asset.brand}`;
             
             if (!stockMap.has(key)) {

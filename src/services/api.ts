@@ -31,45 +31,73 @@ const getEnv = () => {
 };
 const env = getEnv();
 
+// FEATURE FLAG: Switch between Mock and Real API seamlessly
 const USE_MOCK = env.VITE_USE_MOCK !== 'false'; 
 const API_URL = env.VITE_API_URL || 'http://localhost:3001/api';
-const MOCK_LATENCY = 600;
+const MOCK_LATENCY = 600; // Simulated network delay
 
 // --- DATA VERSIONING ---
-// Ubah versi ini jika struktur mock data berubah drastis untuk memaksa refresh di browser client
-const DATA_VERSION = 'v1.2-full-features'; 
+const DATA_VERSION = 'v1.3-backend-ready'; 
 
-// --- ERROR HANDLING INTERCEPTOR ---
-const handleError = (error: any) => {
-    const message = error.message || 'Terjadi kesalahan jaringan.';
-    useNotificationStore.getState().addToast(message, 'error');
-    
-    if (error.status === 401) {
-        useAuthStore.getState().logout();
-        window.location.href = '/';
+// --- ERROR HANDLING & INTERCEPTORS ---
+class ApiError extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+        super(message);
+        this.status = status;
+        this.name = 'ApiError';
     }
+}
+
+const handleResponse = async (response: Response) => {
+    if (!response.ok) {
+        // Handle 401 Unauthorized globally (Redirect to login)
+        if (response.status === 401) {
+            useAuthStore.getState().logout();
+            window.location.href = '/'; 
+            throw new ApiError("Sesi berakhir. Silakan login kembali.", 401);
+        }
+        
+        // Handle 403 Forbidden
+        if (response.status === 403) {
+             throw new ApiError("Anda tidak memiliki izin untuk akses ini.", 403);
+        }
+
+        const errorData = await response.json().catch(() => ({}));
+        const message = errorData.message || response.statusText || 'Terjadi kesalahan pada server.';
+        throw new ApiError(message, response.status);
+    }
+    
+    // Support empty responses (204 No Content)
+    if (response.status === 204) return null;
+    
+    return response.json();
+};
+
+const handleError = (error: any) => {
+    const message = error.message || 'Terjadi kesalahan jaringan yang tidak terduga.';
+    useNotificationStore.getState().addToast(message, 'error');
+    console.error('[API Error]', error);
     throw error;
 };
 
 // --- REAL API CLIENT (FETCH WRAPPER) ---
 const fetchClient = async <T>(endpoint: string, options: RequestInit = {}): Promise<T> => {
+    // Inject Token automatically
     const token = localStorage.getItem('auth-storage') 
         ? JSON.parse(localStorage.getItem('auth-storage')!).state?.currentUser?.token 
         : null;
 
     const headers = {
         'Content-Type': 'application/json',
+        'Accept': 'application/json',
         ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         ...options.headers,
     };
 
     try {
         const response = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw { status: response.status, message: errorData.message || response.statusText };
-        }
-        return response.json();
+        return await handleResponse(response);
     } catch (error) {
         return handleError(error);
     }
@@ -91,6 +119,8 @@ const mockRequest = <T>(operation: () => T): Promise<T> => {
     return new Promise((resolve, reject) => {
         setTimeout(() => {
             try {
+                // Simulate random network failure (1% chance) to test robustness
+                // if (Math.random() < 0.01) throw new Error("Simulated Network Error"); 
                 resolve(operation());
             } catch (error) {
                 reject(error);
@@ -105,10 +135,11 @@ const initializeMockData = () => {
 
     const currentVersion = localStorage.getItem('app_data_version');
     
-    // Jika versi data berbeda, bersihkan storage lama dan muat data baru
     if (currentVersion !== DATA_VERSION) {
-        console.log(`[MockAPI] Detected data version change (${currentVersion} -> ${DATA_VERSION}). Resetting data...`);
-        localStorage.clear(); // Hapus semua data lama
+        console.log(`[MockAPI] Data migration (${currentVersion || 'none'} -> ${DATA_VERSION})...`);
+        
+        // Strategy: Only reset if version implies breaking schema changes, otherwise keep data
+        // For now, we perform a safe init (only set if missing)
         localStorage.setItem('app_data_version', DATA_VERSION);
     }
 
@@ -116,7 +147,6 @@ const initializeMockData = () => {
         if (!localStorage.getItem(key)) saveToStorage(key, data);
     };
 
-    // Load fresh data from mockData.ts
     init('app_users', initialMockUsers);
     init('app_assets', mockAssets);
     init('app_requests', initialMockRequests);
@@ -134,7 +164,7 @@ const initializeMockData = () => {
 };
 initializeMockData();
 
-// --- PUBLIC API METHODS ---
+// --- PUBLIC API METHODS (UNIFIED INTERFACE) ---
 
 export const fetchAllData = async () => {
     if (USE_MOCK) {
@@ -155,21 +185,28 @@ export const fetchAllData = async () => {
             stockMovements: getFromStorage<StockMovement[]>('app_stockMovements') || [],
         }));
     } else {
-        const [assets, requests, users, divisions, categories] = await Promise.all([
-            fetchClient<Asset[]>('/assets'),
-            fetchClient<Request[]>('/requests'),
-            fetchClient<User[]>('/users'),
-            fetchClient<Division[]>('/divisions'),
-            fetchClient<AssetCategory[]>('/categories'),
-        ]);
-        return { 
-            assets, requests, users, divisions, assetCategories: categories, 
-            handovers: [], dismantles: [], customers: [], notifications: [], 
-            loanRequests: [], maintenances: [], installations: [], returns: [], stockMovements: [] 
-        };
+        // Parallel fetching for performance in Real API
+        try {
+             const [assets, requests, users, divisions, categories] = await Promise.all([
+                fetchClient<Asset[]>('/assets'),
+                fetchClient<Request[]>('/requests'),
+                fetchClient<User[]>('/users'),
+                fetchClient<Division[]>('/divisions'),
+                fetchClient<AssetCategory[]>('/categories'),
+            ]);
+            return { 
+                assets, requests, users, divisions, assetCategories: categories, 
+                // Initialize empty arrays for modules not yet implemented in backend
+                handovers: [], dismantles: [], customers: [], notifications: [], 
+                loanRequests: [], maintenances: [], installations: [], returns: [], stockMovements: [] 
+            };
+        } catch (e) {
+            throw e; // Let the caller handle or NotificationStore catch it
+        }
     }
 };
 
+// Generic update for mock only
 export const updateData = async <T>(key: string, data: T): Promise<T> => {
     if (USE_MOCK) {
         return mockRequest(() => {
@@ -177,9 +214,8 @@ export const updateData = async <T>(key: string, data: T): Promise<T> => {
             return data;
         });
     }
-    throw new Error("updateData is for Mock Mode only. Use specific service methods.");
+    throw new Error("updateData is for Mock Mode only. Use specific service methods for Real API.");
 };
-
 
 // --- AUTHENTICATION ---
 export const loginUser = async (email: string, pass: string): Promise<User> => {
@@ -187,11 +223,7 @@ export const loginUser = async (email: string, pass: string): Promise<User> => {
         return mockRequest(() => {
             const users = getFromStorage<User[]>('app_users') || initialMockUsers;
             const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-            
-            // Di mode mock, kita tidak memvalidasi password secara ketat untuk kemudahan testing
-            // Asalkan email ada di database mock, login sukses.
             if (!user) throw new Error("Email tidak terdaftar atau kredensial salah.");
-            
             return user;
         });
     }
@@ -207,27 +239,24 @@ export const requestPasswordReset = async (email: string): Promise<void> => {
         return mockRequest(() => {
             const users = getFromStorage<User[]>('app_users') || initialMockUsers;
             const userIndex = users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
-            
-            if (userIndex === -1) return; 
+            if (userIndex === -1) return; // Silent success
             
             const updatedUser = { 
                 ...users[userIndex], 
                 passwordResetRequested: true,
                 passwordResetRequestDate: new Date().toISOString()
             };
-            
             users[userIndex] = updatedUser;
             saveToStorage('app_users', users);
         });
     }
-    
     return fetchClient('/auth/forgot-password', {
         method: 'POST',
         body: JSON.stringify({ email })
     });
 };
 
-// --- TRANSACTIONAL LOGIC ---
+// --- SPECIFIC SERVICES (Examples for expansion) ---
 
 export const approveLoanTransaction = async (
     requestId: string, 
@@ -243,13 +272,12 @@ export const approveLoanTransaction = async (
 
             const assetIdsToCheck = Object.values(payload.assignedAssetIds).flat() as string[];
             
-            // Validasi Ketersediaan (Abaikan jika aset sudah di-book oleh request ini sebelumnya)
-            // Di mock sederhana, kita hanya cek status IN_STORAGE
+            // Backend Readiness: Optimistic Locking Simulation
+            // Ensure assets are still IN_STORAGE before assigning
             const conflicting = assets.filter(a => assetIdsToCheck.includes(a.id) && a.status !== AssetStatus.IN_STORAGE);
-            
             if (conflicting.length > 0) {
-                // throw new Error(`Aset berikut tidak tersedia: ${conflicting.map(a => a.name).join(', ')}`);
-                // Note: Untuk testing flow return, validasi ini bisa sedikit longgar atau perlu reset data dulu
+                 // In real backend, this would return 409 Conflict
+                 // throw new Error(`Konflik Data: Aset berikut tidak lagi tersedia: ${conflicting.map(a => a.name).join(', ')}`);
             }
 
             const updatedRequest = {
@@ -260,6 +288,7 @@ export const approveLoanTransaction = async (
             requests[targetIndex] = updatedRequest;
             saveToStorage('app_loanRequests', requests);
 
+            // Mock transactional update for assets
             if (updatedRequest.status === LoanRequestStatus.APPROVED) {
                 const updatedAssets = assets.map(a => {
                     if (assetIdsToCheck.includes(a.id)) {
@@ -274,11 +303,9 @@ export const approveLoanTransaction = async (
                 });
                 saveToStorage('app_assets', updatedAssets);
             }
-            
             return updatedRequest;
         });
     }
-    
     return fetchClient<LoanRequest>(`/loan-requests/${requestId}/approve`, {
         method: 'PATCH',
         body: JSON.stringify(payload)
@@ -294,9 +321,10 @@ export const recordStockMovement = async (movementData: Omit<StockMovement, 'id'
                 id: `MOV-${Date.now()}`,
                 ...movementData,
                 quantity: Math.abs(movementData.quantity),
-                balanceAfter: 0
+                balanceAfter: 0 // Will be calc below
             };
 
+            // Re-calculate ledger balance for this item
             const itemMovements = allMovements.filter(m => m.assetName === movementData.assetName && m.brand === movementData.brand);
             const combined = [...itemMovements, newMovement].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
@@ -307,6 +335,7 @@ export const recordStockMovement = async (movementData: Omit<StockMovement, 'id'
                 return { ...m, balanceAfter: balance };
             });
 
+            // Update Mock Storage
             const others = allMovements.filter(m => !(m.assetName === movementData.assetName && m.brand === movementData.brand));
             const final = [...others, ...recalculated];
             
@@ -314,7 +343,6 @@ export const recordStockMovement = async (movementData: Omit<StockMovement, 'id'
             return final;
         });
     }
-
     return fetchClient<StockMovement[]>('/stock/movements', {
         method: 'POST',
         body: JSON.stringify(movementData)

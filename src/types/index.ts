@@ -1,4 +1,5 @@
 
+
 export type Page = 
   | 'dashboard' 
   | 'request' 
@@ -218,6 +219,9 @@ export interface Asset {
     // NEW: Fields for Measurement Tracking
     initialBalance?: number; // Total awal (misal: 1000m)
     currentBalance?: number; // Sisa saat ini (misal: 850m)
+    
+    // Added quantity for bulk count items
+    quantity?: number;
 }
 
 export type ItemClassification = 'asset' | 'material';
@@ -278,14 +282,18 @@ export interface Customer {
     servicePackage: string;
     installedMaterials?: InstalledMaterial[];
     activityLog?: ActivityLogEntry[];
+    notes?: string | null; // Added
+    attachments?: Attachment[]; // Added
 }
 
 export type OrderType = 'Regular Stock' | 'Urgent' | 'Project Based';
+export type AllocationTarget = 'Usage' | 'Inventory'; // New Type
 
 export interface OrderDetails {
     type: OrderType;
     justification?: string;
     project?: string;
+    allocationTarget?: AllocationTarget; // New Field: Menentukan apakah ini untuk dipakai sendiri atau restock gudang
 }
 
 export interface PurchaseDetails {
@@ -372,6 +380,7 @@ export interface LoanItem {
     quantity: number;
     keterangan: string;
     returnDate: string | null;
+    unit?: string; // Optional unit property
 }
 
 export interface LoanRequest {

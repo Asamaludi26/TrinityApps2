@@ -1,6 +1,7 @@
 
+
 import { create } from 'zustand';
-import { Request, LoanRequest, AssetReturn, ItemStatus, LoanRequestStatus, AssetReturnStatus, AssetStatus, AssetCondition } from '../types';
+import { Request, LoanRequest, AssetReturn, ItemStatus, LoanRequestStatus, AssetReturnStatus, AssetStatus, AssetCondition, AllocationTarget } from '../types';
 import * as api from '../services/api';
 import { useNotificationStore } from './useNotificationStore';
 import { useUIStore } from './useUIStore'; 
@@ -92,17 +93,18 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       const docsForGenerator = current.map(r => ({ docNumber: r.id }));
       const newId = generateDocumentNumber('RO', docsForGenerator, requestDate);
       
-      // 2. LOGIKA CERDAS: Cek Stok Otomatis (Dengan Data Segar & Unit Context)
+      // 2. LOGIKA CERDAS: Cek Stok Otomatis
       const { checkAvailability } = useAssetStore.getState();
       const itemStatuses: Record<number, any> = {};
       let allStockAvailable = true;
 
+      // Check allocation target (default to Usage if undefined for staff)
+      const allocationTarget = requestData.order.allocationTarget || 'Usage';
+
       requestData.items.forEach(item => {
-           // CRITICAL FIX: Pass 'item.unit' agar checkAvailability tahu apakah ini request Meter atau Drum
            const stockCheck = checkAvailability(item.itemName, item.itemTypeBrand, item.quantity, item.unit);
            
            if (stockCheck.isSufficient) {
-               // Jika stok ada, langsung alokasikan secara sistem
                itemStatuses[item.id] = { 
                    status: 'stock_allocated', 
                    approvedQuantity: item.quantity,
@@ -111,7 +113,6 @@ export const useRequestStore = create<RequestState>((set, get) => ({
                         : 'Stok tersedia di gudang (Auto-Allocated)' 
                };
            } else {
-               // Jika kurang, tandai butuh pengadaan
                itemStatuses[item.id] = { 
                    status: 'procurement_needed', 
                    approvedQuantity: item.quantity 
@@ -121,9 +122,19 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       });
       
       // 3. Tentukan Status Awal
-      const initialStatus = (allStockAvailable && requestData.order.type === 'Regular Stock') 
-          ? ItemStatus.AWAITING_HANDOVER 
-          : ItemStatus.PENDING;
+      let initialStatus = ItemStatus.PENDING;
+
+      if (allStockAvailable && requestData.order.type === 'Regular Stock') {
+          if (allocationTarget === 'Inventory') {
+              // Jika ini Restock dan stok sudah ada (seharusnya jarang terjadi, tapi possible)
+              // Logikanya: Jika sudah ada, buat apa request? 
+              // Tapi jika user memaksa, kita langsung complete-kan karena tidak perlu proses beli.
+              initialStatus = ItemStatus.COMPLETED;
+          } else {
+              // Usage -> Siap Handover
+              initialStatus = ItemStatus.AWAITING_HANDOVER;
+          }
+      }
       
       const newRequest: Request = {
         ...requestData,
@@ -143,6 +154,8 @@ export const useRequestStore = create<RequestState>((set, get) => ({
       if (initialStatus === ItemStatus.AWAITING_HANDOVER) {
            sendSystemNotif('Admin Logistik', 'REQUEST_CREATED', newRequest.id, 'membuat request (Stok Tersedia, Siap Handover)', true);
            useNotificationStore.getState().addToast('Request dibuat. Stok tersedia, silakan hubungi Logistik untuk pengambilan.', 'success');
+      } else if (initialStatus === ItemStatus.COMPLETED) {
+           useNotificationStore.getState().addToast('Request selesai otomatis (Stok Restock Tersedia).', 'success');
       } else {
            sendSystemNotif('Admin Logistik', 'REQUEST_CREATED', newRequest.id, 'membuat permintaan aset baru (Butuh Pengadaan/Review)', true);
       }
@@ -204,27 +217,50 @@ export const useRequestStore = create<RequestState>((set, get) => ({
         if (regQty < approvedQty) isFullyComplete = false;
     });
 
-    const nextStatus = isFullyComplete ? ItemStatus.AWAITING_HANDOVER : request.status;
-    const isRegisteredFlag = isFullyComplete; 
+    // --- LOGIC PERUBAHAN STATUS BERDASARKAN ALLOCATION TARGET ---
+    const allocationTarget = request.order.allocationTarget || 'Usage';
+    let nextStatus = request.status;
+    let isRegisteredFlag = false;
+
+    if (isFullyComplete) {
+        isRegisteredFlag = true;
+        // Jika target adalah INVENTORY (Restock), kita langsung selesai (COMPLETED)
+        if (allocationTarget === 'Inventory') {
+            nextStatus = ItemStatus.COMPLETED;
+        } else {
+            // Jika Usage, butuh handover
+            nextStatus = ItemStatus.AWAITING_HANDOVER;
+        }
+    }
 
     const updatedRequest = {
         ...request,
         partiallyRegisteredItems: updatedRegistered,
         status: nextStatus,
-        isRegistered: isRegisteredFlag 
+        isRegistered: isRegisteredFlag,
+        // Jika completed langsung, isi completion data
+        completionDate: nextStatus === ItemStatus.COMPLETED ? new Date().toISOString() : request.completionDate,
+        completedBy: nextStatus === ItemStatus.COMPLETED ? useAuthStore.getState().currentUser?.name : request.completedBy
     };
 
-    if (nextStatus === ItemStatus.AWAITING_HANDOVER && request.status !== ItemStatus.AWAITING_HANDOVER) {
+    if (nextStatus !== request.status) {
          const activityLog = updatedRequest.activityLog || [];
+         const logMessage = nextStatus === ItemStatus.COMPLETED 
+            ? 'Pencatatan aset selesai (Restock). Request ditutup.'
+            : 'Seluruh item telah dicatat. Status diubah menjadi Siap Serah Terima.';
+            
          activityLog.unshift({
              id: Date.now(),
              author: 'System',
              timestamp: new Date().toISOString(),
              type: 'status_change',
-             payload: { text: 'Seluruh item telah dicatat. Status diubah menjadi Siap Serah Terima.' }
+             payload: { text: logMessage }
          });
          updatedRequest.activityLog = activityLog;
-         sendSystemNotif(updatedRequest.requester, 'REQUEST_COMPLETED', requestId, 'Aset telah diregistrasi dan siap diserahterimakan', false);
+         
+         if (nextStatus === ItemStatus.AWAITING_HANDOVER) {
+             sendSystemNotif(updatedRequest.requester, 'REQUEST_COMPLETED', requestId, 'Aset telah diregistrasi dan siap diserahterimakan', false);
+         }
     }
 
     const updatedRequests = [...currentRequests];
@@ -233,7 +269,8 @@ export const useRequestStore = create<RequestState>((set, get) => ({
     set({ requests: updatedRequests });
     return true;
   },
-
+  
+  // ... Loan Request and Return Logic remains same ...
   addLoanRequest: async (request) => {
     const current = get().loanRequests;
     const updated = [request, ...current];

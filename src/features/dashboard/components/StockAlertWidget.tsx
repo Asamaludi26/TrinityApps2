@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { Asset, Page } from '../../../types';
 import { ExclamationTriangleIcon } from '../../../components/icons/ExclamationTriangleIcon';
@@ -26,7 +27,11 @@ export const StockAlertWidget: React.FC<StockAlertWidgetProps> = ({ assets, setA
             };
         });
 
-        setActivePage('request', { prefillItems });
+        setActivePage('request', { 
+            prefillItems,
+            // FORCE LOGIC: Restock dari dashboard otomatis mengunci tujuan ke Inventory
+            forcedAllocationTarget: 'Inventory' 
+        });
     };
 
     const bgSoft = activeTab === 'critical' ? 'bg-red-50' : 'bg-amber-50';

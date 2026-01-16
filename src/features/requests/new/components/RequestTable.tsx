@@ -15,7 +15,8 @@ import { RegisterIcon } from '../../../../components/icons/RegisterIcon';
 import { SortIcon } from '../../../../components/icons/SortIcon';
 import { SortAscIcon } from '../../../../components/icons/SortAscIcon';
 import { SortDescIcon } from '../../../../components/icons/SortDescIcon';
-import { RequestStatusIndicator, OrderIndicator } from './RequestStatus';
+import { OrderIndicator } from './RequestStatus'; // Keep OrderIndicator, replace StatusIndicator
+import { StatusBadge } from '../../../../components/ui/StatusBadge'; // NEW
 import { BsCalendarEvent, BsThreeDotsVertical } from 'react-icons/bs';
 
 const SortableHeaderComp: React.FC<{
@@ -29,7 +30,7 @@ const SortableHeaderComp: React.FC<{
   const direction = isSorted ? sortConfig.direction : undefined;
   
   return (
-    <th scope="col" className={`px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 cursor-pointer group select-none transition-colors hover:text-slate-700 ${className}`} onClick={() => requestSort(columnKey)}>
+    <th scope="col" className={`px-6 py-4 text-xs font-bold uppercase tracking-wider text-slate-500 cursor-pointer group select-none transition-colors hover:text-slate-800 ${className}`} onClick={() => requestSort(columnKey)}>
       <div className="flex items-center gap-2">
         <span>{children}</span>
         <span className={`transition-opacity duration-200 ${isSorted ? 'opacity-100 text-tm-primary' : 'opacity-0 group-hover:opacity-50'}`}>
@@ -80,7 +81,7 @@ export const RequestTable: React.FC<RequestTableProps> = ({
 
   return (
     <table className="min-w-full divide-y divide-slate-100">
-      <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur-sm border-b border-slate-200 shadow-sm">
+      <thead className="sticky top-0 z-10 bg-white/90 backdrop-blur-sm border-b border-slate-200 shadow-sm">
         <tr>
           {isBulkSelectMode && (
             <th scope="col" className="px-6 py-4 w-12">
@@ -132,7 +133,7 @@ export const RequestTable: React.FC<RequestTableProps> = ({
             if (isSelected) bgClass = "bg-blue-50/60 border-l-tm-primary";
             else if (isHighlighted) bgClass = "bg-amber-50 border-l-amber-400 animate-pulse-slow";
             else if (showHighlight) bgClass = "bg-blue-50/30 border-l-blue-400";
-            else if (req.order.type === 'Urgent') bgClass = "hover:bg-red-50/20 border-l-transparent hover:border-l-red-400";
+            else if (req.order.type === 'Urgent') bgClass = "hover:bg-rose-50/30 border-l-transparent hover:border-l-rose-400";
             else bgClass = "hover:bg-slate-50 border-l-transparent hover:border-l-slate-300";
 
             return (
@@ -208,11 +209,11 @@ export const RequestTable: React.FC<RequestTableProps> = ({
                     </div>
                 </td>
 
-                {/* Column 4: Status */}
+                {/* Column 4: Status (New Pill Design) */}
                 <td className="px-6 py-5 align-middle">
-                   <RequestStatusIndicator status={req.status} />
+                   <StatusBadge status={req.status} />
                    {req.status === ItemStatus.LOGISTIC_APPROVED && req.logisticApprover && (
-                       <p className="text-[10px] text-slate-400 mt-1.5 ml-1 flex items-center gap-1">
+                       <p className="text-[10px] text-slate-400 mt-1.5 ml-1 flex items-center gap-1 font-medium">
                            <span className="w-1 h-1 rounded-full bg-emerald-400"></span>
                            by {req.logisticApprover.split(' ')[0]}
                        </p>
